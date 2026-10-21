@@ -80,6 +80,8 @@ A site-level lock serializes this harness's commands. It cannot prevent another 
 
 ## Copilot
 
+Use the [copy-and-paste Copilot setup prompt](docs/COPILOT_SETUP_PROMPT.md) to install and test on another machine.
+
 The repository includes `.github/skills/rovo-relay/SKILL.md`, with the same instructions bundled in the package. To use it in another project, review and copy the skill without overwriting an existing one. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Actual VS Code invocation still needs acceptance on the target machine.
 
 ## Privacy and usage
