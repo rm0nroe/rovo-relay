@@ -78,3 +78,24 @@ def test_images_reject_wrong_format_count_size_and_duplicate_name(tmp_path):
     image.write_bytes(b"replaced")
     assert loaded[0]["buffer"] == b"\x89PNG\r\n\x1a\nfixture"
     assert loaded[0]["name"] == "test.png" and loaded[0]["mimeType"] == "image/png"
+
+
+@pytest.mark.parametrize("prompt", [None, "Do not submit this prompt"])
+def test_missing_chrome_endpoint_gives_safe_setup_steps(monkeypatch, tmp_path, prompt):
+    from pathlib import Path
+    from playwright.sync_api import BrowserType, Error
+    from cli_anything.rovo.utils.rovo_backend import operate
+
+    def missing_endpoint(self, *args, **kwargs):
+        raise Error("Could not connect to chrome: DevToolsActivePort file not found at /private-fixture/profile/DevToolsActivePort.\nEnable remote debugging first.")
+
+    monkeypatch.setattr(BrowserType, "connect_over_cdp", missing_endpoint)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    result, code = operate("https://x.atlassian.net", "probe", "test@example.com", prompt=prompt)
+    assert code == 1
+    assert result["submission_state"] == "not_attempted" and result["retry_safe"] is True
+    assert result["error_code"] == "chrome_debugging_unavailable"
+    assert "chrome://inspect/#remote-debugging" in " ".join(result["next_steps"])
+    assert "/private-fixture/" not in json.dumps(result)
+    assert not list(tmp_path.rglob("request.json"))
+    assert not list(tmp_path.rglob("control.lock"))

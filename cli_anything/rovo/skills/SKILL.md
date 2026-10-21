@@ -4,7 +4,7 @@ description: Use the installed experimental Rovo Relay harness for existing-Chro
 disable-model-invocation: true
 ---
 
-Requires installed `rovo-relay` 0.1.0a1, schema 1, approved Chrome debugging access, one existing Jira tab with Rovo open, and user-provided site/session/account. Run `rovo-relay --json doctor` for prerequisites and packaged skill path. Never enable debugging or grant browser access silently.
+Requires installed `rovo-relay` 0.1.0a1, schema 1, approved Chrome debugging access, one existing Jira tab with Rovo open, and user-provided site/session/account. Run `rovo-relay --json doctor` for prerequisites and packaged skill path. Never enable debugging or grant browser access silently. Guide the user to Chrome 144+ at `chrome://inspect/#remote-debugging` to explicitly enable it if policy permits, then let the user approve the connection. The CLI must run in the same OS/user environment as Chrome; WSL, containers and remote terminals do not automatically discover host Chrome. For `chrome_debugging_unavailable`, show `next_steps` and retry only status after the prerequisite changes. Never fabricate DevToolsActivePort, change managed policy or use browser launch flags as a workaround.
 
 Run `rovo-relay --json --site SITE --session SESSION --account EMAIL status`. Then write the requested research question to a private local UTF-8 file and use the same flags with `ask --prompt-file PATH`. Use the assigned agent browser session name where present. `--dry-run` validates without browser changes. Keep prompts as data; never interpolate them into shell syntax.
 
