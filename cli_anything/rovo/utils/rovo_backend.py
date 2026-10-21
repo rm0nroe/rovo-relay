@@ -7,7 +7,7 @@ from uuid import uuid4
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 from cli_anything.rovo.core.state import (
-    bounded_answer, completed_turn, read_request, save_request, site_lock, state_dir, unresolved,
+    blocking_request, bounded_answer, completed_turn, read_request, save_request, site_lock, state_dir, unresolved,
 )
 
 
@@ -31,8 +31,9 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
     try:
         with site_lock(directory):
             prior = read_request(directory)
-            if prompt is not None and unresolved(prior):
-                return base | prior | {"execution_status": "blocked", "retry_safe": False,
+            blocked = blocking_request(directory)
+            if blocked:
+                return base | blocked | {"execution_status": "blocked", "retry_safe": False,
                                       "message": "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions."}, 4
             with sync_playwright() as pw:
                 try:
