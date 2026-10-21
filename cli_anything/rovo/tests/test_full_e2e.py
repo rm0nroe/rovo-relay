@@ -27,6 +27,8 @@ class TestCLISubprocess:
         assert result["authenticated"] == "not_checked"
         assert Path(result["skill_path"]).is_file()
         assert "\nname: ask-rovo\n" in Path(result["skill_path"]).read_text()
+        assert Path(result["skill_path"]).with_name("MCP_FALLBACK.md").is_file()
+        assert result["mcp_handoff"] == "agent_tools_with_local_guard"
 
     def test_invalid_argument_json_no_submission(self):
         output = self.run("--json", "--dry-run", "--site", "https://evil.test", "--session", "probe", "--account", "a@example.com", "status")
@@ -80,3 +82,27 @@ class TestCLISubprocess:
         output = self.run(*args, "12345678-1234-4234-8234-123456789abc")
         assert output.returncode == 0
         assert json.loads(output.stdout)["chat_id"] == "12345678-1234-4234-8234-123456789abc"
+
+    def test_installed_mcp_handoff_preserves_pending_delivery(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        prompt = tmp_path / "prompt.txt"
+        prompt.write_text("A guarded MCP question")
+        args = ["--json", "--site", "https://x.atlassian.net", "--session", "probe", "--account", "a@example.com"]
+        begin = ["mcp", "begin", "--prompt-file", str(prompt), "--before-count", "0"]
+        output = self.run(*args, "--dry-run", *begin)
+        assert output.returncode == 0, output.stdout
+        assert not list(tmp_path.rglob("request.json"))
+        output = self.run(*args, *begin)
+        assert output.returncode == 0, output.stdout
+        record = json.loads(output.stdout)
+        repeated = self.run(*args, *begin)
+        assert repeated.returncode == 4
+        assert json.loads(repeated.stdout)["retry_safe"] is False
+        proof = tmp_path / "completion.json"
+        proof.write_text(json.dumps(dict(request_id=record["request_id"], site="https://x.atlassian.net", account="a@example.com",
+                                        started=True, count=1, status="Response complete.", generating=False,
+                                        user_text="A guarded MCP question", answer="A guarded MCP answer")))
+        output = self.run(*args, "mcp", "finish", "--evidence-file", str(proof))
+        assert output.returncode == 0, output.stdout
+        assert json.loads(output.stdout)["answer"] == "A guarded MCP answer"

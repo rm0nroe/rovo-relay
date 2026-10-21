@@ -37,6 +37,15 @@ def unresolved(record):
                 and record["execution_status"] != "completed")
 
 
+def blocking_request(directory):
+    """Uncertain delivery blocks every session and both transports on this site."""
+    for path in sorted(directory.parent.glob("*/request.json")):
+        record = read_request(path.parent)
+        if unresolved(record):
+            return record
+    return None
+
+
 @contextmanager
 def site_lock(directory):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)

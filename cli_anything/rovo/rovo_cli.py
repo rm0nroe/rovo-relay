@@ -11,6 +11,7 @@ import click
 
 from cli_anything.rovo import __version__
 from cli_anything.rovo.core.state import load_images, validate_target
+from cli_anything.rovo.core.handoff import begin_handoff, finish_handoff
 from cli_anything.rovo.utils.rovo_backend import operate
 
 
@@ -37,8 +38,9 @@ def doctor():
             "python": platform.python_version(), "platform": platform.system(),
             "playwright": importlib.metadata.version("playwright"),
             "skill_path": str(Path(__file__).parent / "skills" / "SKILL.md"),
-            "authenticated": "not_checked", "implemented": ["doctor", "status", "chat list", "chat export", "ask (new or existing chat, PNG images, GitHub source filter)"],
-            "browser_requirement": "Existing Chrome with an approved remote-debugging connection"}, 0
+            "authenticated": "not_checked", "implemented": ["doctor", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)"],
+            "mcp_handoff": "agent_tools_with_local_guard",
+            "browser_requirement": "Direct mode needs approved Chrome debugging; skill fallback needs an already-permitted Playwright MCP session"}, 0
 
 
 def target(ctx):
@@ -104,6 +106,49 @@ def chat_export(ctx, chat_id):
     return operate(*args, action="chat_export", chat_id=str(chat_id))
 
 
+@cli.group()
+def mcp():
+    """Guard an agent-mediated MCP handoff; these commands never connect to MCP or Chrome."""
+
+
+@mcp.command("begin")
+@click.option("--prompt-file", required=True, type=click.File("r", encoding="utf-8"))
+@click.option("--before-count", required=True, type=click.IntRange(min=0))
+@click.pass_context
+def mcp_begin(ctx, prompt_file, before_count):
+    """Reserve the site immediately before the agent's one MCP Submit click."""
+    args = target(ctx)
+    prompt = prompt_file.read(120001).strip()
+    if not 1 <= len(prompt) <= 120000:
+        raise click.UsageError("Prompt must contain 1 to 120000 characters.")
+    if ctx.obj["dry_run"]:
+        return {"schema_version": 1, "dry_run": True, "submission_state": "not_attempted"}, 0
+    try:
+        result = begin_handoff(Path.home(), *args, prompt, before_count)
+        return result | {"schema_version": 1, "execution_status": "reserved", "retry_safe": False}, 0
+    except (ValueError, OSError):
+        return {"schema_version": 1, "execution_status": "blocked", "submission_state": "attempted_unknown",
+                "retry_safe": False, "message": "MCP reservation failed or prior delivery is unresolved. Do not submit; inspect local state."}, 4
+
+
+@mcp.command("finish")
+@click.option("--evidence-file", required=True, type=click.File("r", encoding="utf-8"))
+@click.pass_context
+def mcp_finish(ctx, evidence_file):
+    """Validate agent-observed completion; never resubmit or clear uncertain delivery."""
+    args = target(ctx)
+    if ctx.obj["dry_run"]:
+        return {"schema_version": 1, "dry_run": True, "state_changed": False}, 0
+    try:
+        raw = evidence_file.read(2000001)
+        if len(raw) > 2000000:
+            raise ValueError("Evidence is too large")
+        return finish_handoff(Path.home(), *args, json.loads(raw)), 0
+    except (ValueError, OSError):
+        return {"schema_version": 1, "execution_status": "blocked", "submission_state": "attempted_unknown",
+                "retry_safe": False, "message": "Completion evidence is invalid, mismatched or incomplete. Leave the request blocked; do not resubmit."}, 4
+
+
 def run(args):
     try:
         result = cli.main(args=args, standalone_mode=False)
@@ -123,7 +168,7 @@ def run(args):
 def repl():
     from cli_anything.rovo.utils.repl_skin import ReplSkin
     skin = ReplSkin("rovo-relay", version=__version__, history_file=os.devnull)
-    skin.skill_install_cmd = "Copy the packaged skills/SKILL.md into .github/skills/ask-rovo/SKILL.md"
+    skin.skill_install_cmd = "Copy the packaged skills directory into .github/skills/ask-rovo (including MCP_FALLBACK.md)"
     skin.print_banner()
     prompt = skin.create_prompt_session()
     while True:
