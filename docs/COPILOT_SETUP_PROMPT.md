@@ -18,6 +18,15 @@ Install Rovo Relay from https://github.com/rm0nroe/rovo-relay and configure it f
 Composio, Atlassian MCP, and an official Rovo CLI are not dependencies. Do not install them, enable paid usage, or change connector permissions.
 
 Complete every unblocked step. Report installation, skill setup, authenticated browser access, and actual GitHub retrieval separately. A completed response alone does not prove successful retrieval. Stop after the one live test and report any remaining blocker.
+
+If blocked, provide a short, copyable report for the Rovo Relay developer containing:
+- OS, shell, Python version, installed Rovo Relay version, and checkout commit if available.
+- Failed step: install, /ask-rovo discovery, doctor, browser status, or live question.
+- Exact command, exit code, and error/JSON output; mark unavailable details rather than guessing.
+- Whether Chrome requested approval and whether Jira/Rovo is open and signed in.
+- Whether a prompt was submitted, whether Rovo answered in the browser, and any submission_state or retry_safe values. If delivery is uncertain, say so explicitly.
+
+Redact account emails, private site/repo names, personal paths, tokens, and proprietary content from the report. Preserve error wording and JSON field names around redactions. Never include cookies or browser profiles. If the error is visible only in Chrome or VS Code, include a cropped, redacted screenshot if available, or describe the visible message. Do not rerun a live request just to collect diagnostics. Leave the chat and request records intact, and never retry a possibly submitted prompt automatically.
 ```
 
 Other-machine browser access and code retrieval remain unverified until this test passes.
