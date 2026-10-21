@@ -11,6 +11,14 @@ Install Rovo Relay from https://github.com/rm0nroe/rovo-relay and configure it f
 
 3. Connect to my existing signed-in normal Chrome session with Jira and Rovo using the documented requirements. Preserve tabs and unsent drafts. Do not extract cookies, start an isolated browser, or bypass browser or account restrictions. Ask for my Jira URL and expected account if needed. Before attaching, check that Chrome is version 144 or newer and the CLI runs in the same OS/user environment as Chrome (not a separate WSL, container, or remote environment). Guide me to `chrome://inspect/#remote-debugging` in that Chrome to explicitly enable remote debugging if organizational policy allows it. Explain that this grants control of the Chrome session, not just Rovo. Keep Chrome open, run status, and have me approve the connection prompt. If the setting is missing or managed, report that blocker; do not change policy, restart Chrome with debugging flags, or fabricate a DevToolsActivePort file.
 
+
+If the CLI cannot attach to Chrome, perform this read-only check using Copilot's already-configured Playwright MCP, if available:
+- Inspect its existing configuration without revealing secrets. Report whether it uses an extension, a CDP endpoint, or its own browser profile. Do not install or reconfigure anything.
+- Use only its existing permitted connection to list accessible tabs. If doing so requires launching another browser or granting new permissions, stop and report that requirement instead.
+- If my Jira tab is accessible, inspect only that tab to confirm the expected account and visible Rovo panel. Do not submit a prompt, change settings, install extensions, navigate unrelated tabs, or close tabs.
+- If it cannot access my session, report the exact error and whether it only sees a separate browser. If the MCP is unavailable, say so without installing it.
+- Include this result in the blocker report, then stop before steps 4 and 5. Successful MCP access is evidence for a possible future adapter, not proof that the current CLI works. The current CLI cannot automatically reuse Copilot's MCP connection; do not implement or claim a working fallback during setup.
+
 4. Run the account-bound `status` command. Once it succeeds, confirm available Rovo credits and ask me for a repository/file that Rovo already reads successfully by hand.
 
 5. Submit ONE question through `rovo-relay` with `--github-source on`, asking Rovo to summarize that file and provide its source link. Use a private prompt file. Never automatically retry an uncertain submission or erase request records to bypass a guard.
@@ -21,7 +29,7 @@ Complete every unblocked step. Report installation, skill setup, authenticated b
 
 If blocked, provide a short, copyable report for the Rovo Relay developer containing:
 - OS, shell, Python version, installed Rovo Relay version, and checkout commit if available; Chrome version/channel and whether the terminal runs locally, in WSL, a container, or a remote session.
-- Failed step: install, /ask-rovo discovery, doctor, browser status, or live question.
+- Failed step: install, /ask-rovo discovery, doctor, browser status, or live question; include the read-only MCP check result if attempted.
 - Exact command, exit code, and error/JSON output; mark unavailable details rather than guessing.
 - Whether Chrome remote debugging is enabled, missing or managed; whether Chrome requested approval; and whether Jira/Rovo is open and signed in.
 - Whether a prompt was submitted, whether Rovo answered in the browser, and any submission_state or retry_safe values. If delivery is uncertain, say so explicitly.
