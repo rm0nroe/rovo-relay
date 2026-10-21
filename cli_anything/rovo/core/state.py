@@ -23,6 +23,7 @@ def validate_target(site, session, account):
 
 
 def state_dir(home, origin, session):
+    # Keep the original state directory so renaming cannot bypass uncertain-delivery guards.
     return Path(home) / ".cli-anything-rovo" / urlsplit(origin).hostname / session
 
 
