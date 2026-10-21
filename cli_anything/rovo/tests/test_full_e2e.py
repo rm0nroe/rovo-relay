@@ -12,13 +12,13 @@ def _resolve_cli(name):
     if path:
         return [path]
     if os.getenv("CLI_ANYTHING_FORCE_INSTALLED") == "1":
-        raise RuntimeError("Install rojo-relay and put it on PATH first.")
+        raise RuntimeError("Install rovo-relay and put it on PATH first.")
     return [sys.executable, "-m", "cli_anything.rovo"]
 
 
 class TestCLISubprocess:
     def run(self, *args):
-        return subprocess.run(_resolve_cli("rojo-relay") + list(args), text=True, capture_output=True, timeout=10)
+        return subprocess.run(_resolve_cli("rovo-relay") + list(args), text=True, capture_output=True, timeout=10)
 
     def test_doctor_and_packaged_skill(self):
         output = self.run("--json", "doctor")
