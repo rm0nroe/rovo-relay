@@ -1,5 +1,5 @@
 ---
-name: rovo-relay
+name: ask-rovo
 description: Use the installed experimental Rovo Relay harness for existing-Chrome status questions, PNG images, GitHub chat source selection and conversation continuity.
 disable-model-invocation: true
 ---

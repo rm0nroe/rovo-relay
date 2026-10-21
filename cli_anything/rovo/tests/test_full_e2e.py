@@ -26,6 +26,7 @@ class TestCLISubprocess:
         result = json.loads(output.stdout)
         assert result["authenticated"] == "not_checked"
         assert Path(result["skill_path"]).is_file()
+        assert "\nname: ask-rovo\n" in Path(result["skill_path"]).read_text()
 
     def test_invalid_argument_json_no_submission(self):
         output = self.run("--json", "--dry-run", "--site", "https://evil.test", "--session", "probe", "--account", "a@example.com", "status")

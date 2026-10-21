@@ -123,7 +123,7 @@ def run(args):
 def repl():
     from cli_anything.rovo.utils.repl_skin import ReplSkin
     skin = ReplSkin("rovo-relay", version=__version__, history_file=os.devnull)
-    skin.skill_install_cmd = "Copy the packaged skills/SKILL.md into .github/skills/rovo-relay/SKILL.md"
+    skin.skill_install_cmd = "Copy the packaged skills/SKILL.md into .github/skills/ask-rovo/SKILL.md"
     skin.print_banner()
     prompt = skin.create_prompt_session()
     while True:

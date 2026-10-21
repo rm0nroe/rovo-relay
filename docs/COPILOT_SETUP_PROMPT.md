@@ -7,7 +7,7 @@ Install Rovo Relay from https://github.com/rm0nroe/rovo-relay and configure it f
 
 1. Read README.md and AGENTS.md. Detect my OS and shell. Clone into my normal development folder, create a Python virtual environment, install the package, and run `rovo-relay --json doctor`. Preserve existing local work.
 
-2. Copy the included `.github/skills/rovo-relay/SKILL.md` into my current project without overwriting an existing skill. Ensure Copilot can invoke the installed `rovo-relay` executable.
+2. Copy the included `.github/skills/ask-rovo/SKILL.md` into my current project without overwriting an existing skill. Verify the skill is available as `/ask-rovo` and can invoke the installed `rovo-relay` executable. If an older Rovo Relay skill is present, replace only that skill after confirming it has no local customizations.
 
 3. Connect to my existing signed-in normal Chrome session with Jira and Rovo using the documented requirements. Preserve tabs and unsent drafts. Do not extract cookies, start an isolated browser, or bypass browser or account restrictions. Ask for my Jira URL and expected account if needed.
 
