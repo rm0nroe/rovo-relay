@@ -1,8 +1,8 @@
-# CLI-Anything Rovo
+# Rojo Relay
 
 An experimental local command that lets a coding agent ask Rovo through an existing signed-in Chrome session. Browser interaction and waiting happen inside Playwright; the agent receives a bounded JSON result. Built using the CLI-Anything workflow, Python/Click and the upstream ReplSkin. This is not an official Atlassian or HKUDS client.
 
-The repository is private. Changing visibility requires an explicit owner instruction.
+This is an experimental, unofficial client. See the validation notes before live use.
 
 ## What works
 
@@ -24,7 +24,7 @@ From the cloned repository, on macOS or Linux:
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install .
-cli-anything-rovo --json doctor
+rojo-relay --json doctor
 ```
 
 The command can then run from any directory while that environment is active. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
@@ -34,7 +34,7 @@ The command can then run from any directory while that environment is active. Wi
 Open exactly one Jira tab for the intended site, sign in normally and open its Rovo panel. Close any unsent draft before running a command. Substitute your own site and account below; examples contain no configured account.
 
 ```sh
-cli-anything-rovo --json \
+rojo-relay --json \
   --site https://example.atlassian.net/jira \
   --session pilot --account user@example.com status
 ```
@@ -44,7 +44,7 @@ The browser permission grants access to the Chrome session. The adapter limits i
 Write a question to a private local UTF-8 file, then:
 
 ```sh
-cli-anything-rovo --json \
+rojo-relay --json \
   --site https://example.atlassian.net/jira \
   --session pilot --account user@example.com \
   ask --prompt-file question.txt
@@ -80,7 +80,7 @@ A site-level lock serializes this harness's commands. It cannot prevent another 
 
 ## Copilot
 
-The repository includes `.github/skills/rovo/SKILL.md`, with the same instructions bundled in the package. To use it in another project, review and copy the skill without overwriting an existing one. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Actual VS Code invocation still needs acceptance on the target machine.
+The repository includes `.github/skills/rojo-relay/SKILL.md`, with the same instructions bundled in the package. To use it in another project, review and copy the skill without overwriting an existing one. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Actual VS Code invocation still needs acceptance on the target machine.
 
 ## Privacy and usage
 

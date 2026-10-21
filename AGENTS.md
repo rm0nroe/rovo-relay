@@ -1,6 +1,6 @@
 # Repository boundaries
 
-Keep this repository private. Do not change visibility without an explicit instruction from its owner.
+The owner authorized public publication. Keep all runtime data and account-specific evidence out of this repository.
 
 Do not commit browser profiles, cookies, credentials, account-specific configuration, conversation exports, screenshots, raw test logs, machine-specific paths, or real conversation identifiers. Use synthetic fixtures and example.com addresses. Keep runtime outputs outside the repository.
 

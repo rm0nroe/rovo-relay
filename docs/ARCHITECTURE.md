@@ -31,7 +31,7 @@ Completed means a response was obtained. It does not verify facts, prove GitHub 
 | `core/state.py` | Validation, file bytes, locks, durable request records and completion predicate |
 | `utils/rovo_backend.py` | Account/site binding, observed UI operations, response extraction |
 | `utils/repl_skin.py` | Unmodified upstream CLI-Anything REPL presentation |
-| `.github/skills/rovo/SKILL.md` | Agent-facing invocation and authority limits |
+| `.github/skills/rojo-relay/SKILL.md` | Agent-facing invocation and authority limits |
 
 The local request record stores destination/account/chat metadata, request ID and delivery status. It does not store the prompt or image body by default. Browser authentication remains in Chrome. Output and explicit exports may contain private information and must not be committed.
 
