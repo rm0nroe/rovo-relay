@@ -29,6 +29,15 @@ rovo-relay --json doctor
 
 The command can then run from any directory while that environment is active. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
 
+
+### Chrome connection setup
+
+Opening Jira and signing in does not enable browser automation. This connection mode requires Chrome 144+ with remote debugging explicitly enabled in `chrome://inspect/#remote-debugging`. Keep Chrome open, run the account-bound `status` command, and approve Chrome's connection prompt yourself. The permission covers the Chrome session, not only Rovo. Follow your organization's policy; if the setting is unavailable or managed, report it instead of bypassing it. See [Chrome's documented setup](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session). No MCP installation is needed by Rovo Relay.
+
+Run the CLI in the same OS and user environment as normal Chrome. The adapter uses Playwright's `chrome` channel discovery for the default Chrome data location; WSL, containers, remote terminals, other Chrome channels and custom data locations are not automatically matched to the host browser.
+
+`DevToolsActivePort file not found` means discovery could not read the connection file. It does not prove an authentication or GitHub failure, or by itself identify whether debugging is disabled, the browser is unsupported, or the runtime is looking in a different environment. The CLI now returns `error_code: chrome_debugging_unavailable` and `next_steps` without exposing the local profile path. Do not create that file manually or launch a replacement browser with debugging flags. Enable the supported setting if permitted, then retry only `status`. If it still fails, provide the browser version/channel, runtime environment and setting state using the setup prompt's blocker report.
+
 ## First use
 
 Open exactly one Jira tab for the intended site, sign in normally and open its Rovo panel. Close any unsent draft before running a command. Substitute your own site and account below; examples contain no configured account.

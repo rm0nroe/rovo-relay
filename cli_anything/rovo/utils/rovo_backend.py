@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 from cli_anything.rovo.core.state import (
     bounded_answer, completed_turn, read_request, save_request, site_lock, state_dir, unresolved,
@@ -35,7 +35,18 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 return base | prior | {"execution_status": "blocked", "retry_safe": False,
                                       "message": "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions."}, 4
             with sync_playwright() as pw:
-                browser = pw.chromium.connect_over_cdp("chrome", timeout=20000, no_defaults=True)
+                try:
+                    browser = pw.chromium.connect_over_cdp("chrome", timeout=20000, no_defaults=True)
+                except PlaywrightError as error:
+                    if "DevToolsActivePort file not found" not in str(error):
+                        raise
+                    base.update(error_code="chrome_debugging_unavailable", next_steps=[
+                        "Use Chrome 144+ in the same OS and user environment as this CLI; WSL, containers and remote terminals do not automatically discover host Chrome.",
+                        "In that Chrome, open chrome://inspect/#remote-debugging and explicitly enable remote debugging if permitted by your organization.",
+                        "Keep Chrome open, rerun status, and approve the Chrome connection prompt yourself.",
+                        "If unavailable or still failing, report Chrome version/channel, CLI environment and whether the setting is managed; do not change policy or create a DevToolsActivePort file.",
+                    ])
+                    raise ValueError("Chrome debugging connection is unavailable: DevToolsActivePort file not found.") from error
                 try:
                     pages = [p for context in browser.contexts for p in context.pages
                              if p.url.startswith(origin + "/jira/")]
