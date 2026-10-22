@@ -54,6 +54,12 @@ def test_terminal_status_without_observed_start_is_not_completion():
         assert not completed_turn(**(good | change))
 
 
+@pytest.mark.parametrize("generating", [None, 0, ""])
+def test_completion_rejects_non_boolean_generation_state(generating):
+    assert not completed_turn(started=True, count=1, status="Response complete.",
+                              generating=generating, answer="ok", before=0, prompt_matches=True)
+
+
 def test_output_cap_is_explicit():
     assert bounded_answer("abcdef", 3) == {"answer": "abc", "truncated": True}
     assert bounded_answer("abc", 3) == {"answer": "abc", "truncated": False}
