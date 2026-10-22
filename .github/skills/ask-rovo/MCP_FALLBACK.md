@@ -22,7 +22,7 @@ Read-only user requests (status, loaded chat listing/export) need no send reserv
 4. Capture the response-card count **after** selecting the new/existing chat and **before** submitting. Use current DOM observations, not invented numbers. Immediately before the one Submit click, run:
 
 ```sh
-rovo-relay --json --site SITE --session SESSION --account EMAIL mcp begin --prompt-file PRIVATE_PROMPT_FILE --before-count N
+rovo-relay-cli --json --site SITE --session SESSION --account EMAIL mcp begin --prompt-file PRIVATE_PROMPT_FILE --before-count N
 ```
 
 Continue only after exit 0 with `execution_status: reserved` and a request ID. Recheck the exact site, account and filled prompt immediately before Submit and stop if anything changed; retain the reservation on uncertainty. This deliberately records `attempted_unknown` before the click. If the command fails, its output is missing, or the context is interrupted, do not submit. Do not call begin again to manufacture a new request. The reservation blocks another send through either mode, even under another session name.
@@ -51,7 +51,7 @@ Use only observed fields to write a private UTF-8 JSON evidence file. It must co
 Then run:
 
 ```sh
-rovo-relay --json --site SITE --session SESSION --account EMAIL mcp finish --evidence-file PRIVATE_EVIDENCE_FILE
+rovo-relay-cli --json --site SITE --session SESSION --account EMAIL mcp finish --evidence-file PRIVATE_EVIDENCE_FILE
 ```
 
 Do not fill missing fields with desired values to pass validation. Only a successful finish clears the pending handoff. It validates correlation and types, caps the returned answer at 12,000 characters, and marks `completion_evidence: agent_observed` and `retrieval_assessment: unverified`. It cannot independently prove what the MCP browser displayed or verify code facts. Never edit local records manually to unblock a failed finish.

@@ -14,6 +14,8 @@ flowchart LR
   G --> A
 ```
 
+The canonical command is `rovo-relay-cli`; `rovo-relay` remains a compatibility alias. Both enter the same handlers and preserve the original `.cli-anything-rovo` state directory. The Python distribution remains `rovo-relay` for in-place upgrades.
+
 CLI-Anything supplies the development methodology and REPL presentation. The installed CLI does not run another coding model to generate tools at runtime. The adapter is Python-native and does not invoke the earlier Node prototype. Its upstream source is pinned in NOTICE.
 
 ## Request lifecycle
