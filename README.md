@@ -41,13 +41,15 @@ Run the CLI in the same OS and user environment as normal Chrome. The adapter us
 
 ## First use
 
-Open exactly one Jira tab for the intended site, sign in normally and open its Rovo panel. Close any unsent draft before running a command. Substitute your own site and account below; examples contain no configured account.
+Sign in normally and open Rovo in the intended site's `/jira/` or `/browse/` tab. Other tabs may stay open: the adapter selects the only eligible tab with a visible Rovo panel, regardless of which Chrome tab is foreground. If multiple eligible tabs have Rovo open, it stops; leave the panel open only in the intended tab without discarding drafts. Requests require an idle composer; preserve existing drafts and attachments. Substitute your own site and account below; examples contain no configured account.
 
 ```sh
 rovo-relay --json \
   --site https://example.atlassian.net/jira \
   --session pilot --account user@example.com status
 ```
+
+The floating mini-modal supports account-bound read-only `status`: `readiness: authenticated_ui_read_only` and `active_generation: null`. A completed status check confirms the account, panel and visible composer; it does not establish safe sending or a completed response. Ask, list and export remain blocked with `error_code: rovo_layout_unverified` (exit 1). Its response cards and message groups are observed, but generation, attachment-state handling and reliable completion remain unverified. `Message sent.` is not a completion signal; neither an empty composer nor disabled New chat establishes safety. Do not switch transports to bypass these limits. Legacy operations require one visible enabled composer and an enabled New chat button for a new conversation.
 
 The browser permission grants access to the Chrome session. The adapter limits its operations to the matching Jira site and expected account, but that is not a browser-enforced restriction to one tab.
 

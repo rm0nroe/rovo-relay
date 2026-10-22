@@ -11,9 +11,20 @@ from cli_anything.rovo.core.state import (
 )
 
 
+def resolve_panel(page):
+    panels = [panel for test_id in ("conversation-assistant.ui.conversation-assistant",
+                                    "conversation-assistant-mini-modal-main-container")
+              for panel in page.get_by_test_id(test_id).all() if panel.is_visible()]
+    if len(panels) > 1:
+        raise ValueError("Multiple visible Rovo panels in one tab; no tabs changed or prompt sent.")
+    return panels[0] if panels else None
+
+
 def require_idle(panel):
     textbox = panel.get_by_role("textbox")
-    draft = textbox.evaluate("""el => { const copy = el.cloneNode(true); copy.querySelectorAll('[data-testid="placeholder-test-id"]').forEach(n => n.remove()); return copy.textContent.trim(); }""") if textbox.is_visible() else ""
+    if textbox.count() != 1 or not textbox.is_visible() or not textbox.is_enabled():
+        raise ValueError("Expected one visible enabled Rovo composer; no prompt sent.")
+    draft = textbox.evaluate("""el => { const copy = el.cloneNode(true); copy.querySelectorAll('[data-testid="placeholder-test-id"]').forEach(n => n.remove()); return copy.textContent.trim(); }""")
     if (panel.get_by_role("button", name="Stop generating", exact=True).is_visible() or draft
             or panel.get_by_role("button", name=re.compile(r"^Remove file ")).count()):
         raise ValueError("Existing draft, attachment or active response; no prompt sent.")
@@ -21,6 +32,7 @@ def require_idle(panel):
 
 def operate(origin, session, account, prompt=None, timeout=180, images=(), github_source=None,
             chat_id=None, action="status"):
+    allowed_prefixes = (origin + "/jira/", origin + "/browse/")
     directory = state_dir(Path.home(), origin, session)
     record = {"request_id": str(uuid4()), "site": origin, "account": account, "chat_id": chat_id,
               "submission_state": "not_attempted", "execution_status": "prepared"}
@@ -50,9 +62,14 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Chrome debugging connection is unavailable: DevToolsActivePort file not found.") from error
                 try:
                     pages = [p for context in browser.contexts for p in context.pages
-                             if p.url.startswith(origin + "/jira/")]
+                             if p.url.startswith(allowed_prefixes)]
+                    if not pages:
+                        raise ValueError("Open a /jira/ or /browse/ tab for the requested site; no tabs changed.")
+                    pages = [p for p in pages if resolve_panel(p) is not None]
+                    if not pages:
+                        raise ValueError("Open Rovo in a /jira/ or /browse/ tab for the requested site first; no tabs changed.")
                     if len(pages) != 1:
-                        raise ValueError("Expected exactly one existing Jira tab for the requested site; no tabs changed.")
+                        raise ValueError("Rovo is open in multiple tabs for the requested site; leave it open only in the intended tab. No tabs changed.")
                     page = pages[0]
                     page.set_default_timeout(10000)
                     identity = page.get_by_role("button", name=account, exact=True)
@@ -65,9 +82,21 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             identity.wait_for(state="visible")
                         finally:
                             page.keyboard.press("Escape")
-                    panel = page.get_by_test_id("conversation-assistant.ui.conversation-assistant")
-                    if not panel.is_visible():
+                    panel = resolve_panel(page)
+                    if panel is None:
                         raise ValueError("Open Rovo in the existing Jira tab first; this slice does not navigate or log in.")
+                    if panel.get_attribute("data-testid") == "conversation-assistant-mini-modal-main-container":
+                        # shortcut: status only until mini-modal generation and completion are verified.
+                        if prompt is None and action == "status":
+                            textbox = panel.get_by_role("textbox")
+                            if textbox.count() != 1 or not textbox.is_visible():
+                                raise ValueError("Expected one visible Rovo composer; no prompt sent.")
+                            return base | record | {"execution_status": "completed", "readiness": "authenticated_ui_read_only",
+                                                   "active_generation": None, "prior_request": prior,
+                                                   "retry_safe": not unresolved(prior),
+                                                   "message": "Mini-modal status only; generation, attachments and completion are unverified. Chat actions remain blocked."}, 0
+                        base["error_code"] = "rovo_layout_unverified"
+                        raise ValueError("Rovo mini-modal detected; generation, attachment and completion controls are unverified. No prompt sent.")
                     stop = panel.get_by_role("button", name="Stop generating", exact=True)
                     if prompt is None and action == "status":
                         return base | record | {"execution_status": "completed", "readiness": "authenticated_ui",
@@ -114,7 +143,10 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                            "messages": messages, "truncated": total > 24000,
                                            "attachment_bytes_included": False}, 0
                     else:
-                        panel.get_by_role("button", name="New chat", exact=True).click()
+                        new_chat = panel.get_by_role("button", name="New chat", exact=True)
+                        if not new_chat.is_enabled():
+                            raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
+                        new_chat.click()
                         page.wait_for_function("""() => document.querySelectorAll('[data-testid="assistant-response-card-layout"]').length === 0""")
                     before = responses.count()
                     require_idle(panel)
@@ -141,7 +173,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         panel.get_by_role("button", name=attachment["name"][:-4] + " PNG", exact=True).wait_for(state="visible", timeout=30000)
                     if not panel.get_by_role("button", name="Submit", exact=True).is_enabled():
                         raise ValueError("Prompt or attachment is not ready; no prompt sent. Inspect the retained draft.")
-                    if textbox.inner_text().strip() != prompt.strip() or not page.url.startswith(origin + "/jira/"):
+                    if textbox.inner_text().strip() != prompt.strip() or not page.url.startswith(allowed_prefixes):
                         raise ValueError("Target or draft changed before submission.")
                     record.update(submission_state="attempted_unknown", execution_status="waiting")
                     save_request(directory, record)
@@ -151,7 +183,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     started = False
                     answer = ""
                     while time.monotonic() < deadline:
-                        if not page.url.startswith(origin + "/jira/"):
+                        if not page.url.startswith(allowed_prefixes):
                             raise ValueError("Browser left the expected site after submission.")
                         status = panel.get_by_test_id("chat-history-status-live-region").inner_text()
                         generating = stop.is_visible()
