@@ -201,10 +201,16 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                        "attachment_bytes_included": False}, 0
                 else:
                     new_chat = panel.get_by_role("button", name="New chat", exact=True)
-                    if not new_chat.is_enabled():
-                        raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
-                    new_chat.click()
-                    page.wait_for_function("""() => document.querySelectorAll('[data-testid="assistant-response-card-layout"]').length === 0""")
+                    if new_chat.is_enabled():
+                        new_chat.click()
+                        page.wait_for_function("""() => document.querySelectorAll('[data-testid="assistant-response-card-layout"]').length === 0""")
+                    else:
+                        welcome = panel.get_by_role("heading", name=re.compile(r"^How can I help(?:, .+)?\?$"))
+                        submit = panel.get_by_role("button", name="Submit", exact=True)
+                        if (not new_chat.is_visible() or welcome.count() != 1 or not welcome.is_visible()
+                                or responses.count() != 0 or panel.get_by_test_id("rovo-chat-message-group").count() != 0
+                                or not submit.is_visible() or submit.is_enabled()):
+                            raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
                 before = responses.count()
                 require_idle(panel)
                 if github_source is not None:
