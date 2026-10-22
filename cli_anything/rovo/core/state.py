@@ -81,7 +81,7 @@ def save_request(directory, record):
 
 
 def completed_turn(*, started, count, status, generating, answer, before=0, prompt_matches=True):
-    return started and count > before and prompt_matches and status.strip() == "Response complete." and not generating and bool(answer.strip())
+    return started and count > before and prompt_matches and status.strip() == "Response complete." and generating is False and bool(answer.strip())
 
 
 def bounded_answer(answer, limit=12000):
