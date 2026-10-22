@@ -17,7 +17,7 @@ PROMPT = "Summarize a synthetic fixture"
 
 
 def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
-                 before_submit_url=None, after_submit_url=None, layout=PANEL):
+                 before_submit_url=None, after_submit_url=None, layout=PANEL, empty_chat=False):
     page = MagicMock(spec=Page)
     page.url = url
     panel, textbox, stop, submit, new_chat, attachments, identity, more = [
@@ -33,11 +33,17 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     attachments.count.return_value = 0
     identity.is_visible.return_value = authenticated
     more.is_visible.return_value = False
-    submit.is_enabled.return_value = True
+    submit.is_enabled.return_value = not empty_chat
+    submit.is_visible.return_value = True
     new_chat.is_enabled.return_value = True
+    new_chat.is_visible.return_value = True
+    welcome = MagicMock(spec=Locator)
+    welcome.count.return_value = int(empty_chat)
+    welcome.is_visible.return_value = empty_chat
 
     def fill(text):
         textbox.inner_text.return_value = text
+        submit.is_enabled.return_value = True
         if before_submit_url:
             page.url = before_submit_url
 
@@ -46,13 +52,14 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     responses.count.return_value = 0
     responses.last.locator.return_value = content
     content.all_inner_texts.return_value = ["Synthetic answer"]
-    groups.count.return_value = 1
+    groups.count.return_value = 0 if empty_chat else 1
     groups.last.locator.return_value.first = user
     user.inner_text.return_value = PROMPT
     status.inner_text.side_effect = ["Rovo is thinking", "Response complete."]
 
     def send():
         responses.count.return_value = 1
+        groups.count.return_value = 1
         if after_submit_url:
             page.url = after_submit_url
 
@@ -63,7 +70,8 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
         "chat-history-status-live-region": status,
     }.__getitem__
     panel.get_by_role.side_effect = lambda role, name=None, **kw: (
-        textbox if role == "textbox" else attachments if not isinstance(name, str)
+        textbox if role == "textbox" else welcome if role == "heading" and name.search("How can I help, Fixture?")
+        else attachments if not isinstance(name, str)
         else {"Stop generating": stop, "Submit": submit, "New chat": new_chat}[name]
     )
     roots = {}
@@ -78,7 +86,8 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     }[name]
     return SimpleNamespace(page=page, panel=panel, roots=roots, submit=submit,
                            textbox=textbox, stop=stop, attachments=attachments,
-                           responses=responses, status=status, new_chat=new_chat)
+                           responses=responses, groups=groups, welcome=welcome,
+                           status=status, new_chat=new_chat)
 
 
 @pytest.fixture
@@ -171,6 +180,7 @@ def test_supported_route_completes_one_guarded_send(run_browser, tmp_path, path)
     target = page_fixture(ORIGIN + path)
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 0 and result["answer"] == "Synthetic answer", result
+    target.new_chat.click.assert_called_once()
     target.submit.click.assert_called_once()
     record = read_request(state_dir(tmp_path, ORIGIN, "probe"))
     assert record["submission_state"] == "observed_submitted"
@@ -304,6 +314,51 @@ def test_disabled_new_chat_is_not_assumed_empty(run_browser, tmp_path):
     target.new_chat.is_enabled.return_value = False
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and "New chat" in result["message"], result
+    target.new_chat.click.assert_not_called()
+    target.textbox.fill.assert_not_called()
+    target.submit.click.assert_not_called()
+    assert not list(tmp_path.rglob("request.json"))
+
+
+@pytest.mark.parametrize("path", ["/jira/for-you", "/browse/DEMO-1"])
+def test_verified_empty_sidebar_sends_without_clicking_disabled_new_chat(run_browser, tmp_path, path):
+    target = page_fixture(ORIGIN + path, empty_chat=True)
+    target.new_chat.is_enabled.return_value = False
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["answer"] == "Synthetic answer", result
+    target.new_chat.click.assert_not_called()
+    target.page.wait_for_function.assert_not_called()
+    target.textbox.fill.assert_called_once_with(PROMPT)
+    target.submit.click.assert_called_once()
+    record = read_request(state_dir(tmp_path, ORIGIN, "probe"))
+    assert record["submission_state"] == "observed_submitted"
+    assert record["execution_status"] == "completed"
+
+
+@pytest.mark.parametrize("state", [
+    "draft", "attachment", "generating", "turn", "response", "missing_welcome",
+    "hidden_welcome", "duplicate_welcome", "hidden_new_chat", "hidden_submit",
+    "enabled_submit", "mini_modal",
+])
+def test_disabled_new_chat_rejects_unverified_empty_states(run_browser, tmp_path, state):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1", empty_chat=True,
+                          draft="Unsent work" if state == "draft" else "",
+                          layout=MINI_PANEL if state == "mini_modal" else PANEL)
+    target.new_chat.is_enabled.return_value = False
+    target.new_chat.is_visible.return_value = state != "hidden_new_chat"
+    target.submit.is_enabled.return_value = state == "enabled_submit"
+    target.submit.is_visible.return_value = state != "hidden_submit"
+    target.attachments.count.return_value = int(state == "attachment")
+    target.stop.is_visible.return_value = state == "generating"
+    target.groups.count.return_value = int(state == "turn")
+    target.responses.count.return_value = int(state == "response")
+    target.welcome.count.return_value = {"missing_welcome": 0, "duplicate_welcome": 2}.get(state, 1)
+    target.welcome.is_visible.return_value = state != "hidden_welcome"
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1, result
+    assert result["submission_state"] == "not_attempted" and result["retry_safe"] is True
+    if state == "mini_modal":
+        assert result["error_code"] == "rovo_layout_unverified"
     target.new_chat.click.assert_not_called()
     target.textbox.fill.assert_not_called()
     target.submit.click.assert_not_called()
