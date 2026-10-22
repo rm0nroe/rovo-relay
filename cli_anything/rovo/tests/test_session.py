@@ -52,6 +52,62 @@ def test_stream_reuses_connection_and_rechecks_account(browser_env, monkeypatch,
     env.target.submit.click.assert_not_called()
 
 
+def test_explicit_chrome_port_reuses_one_loopback_attachment(browser_env, monkeypatch, capsys):
+    code, results = stream(monkeypatch, capsys, [["status"]], "--chrome-port", "9222")
+    assert code == 0 and [r["exit_code"] for r in results] == [0, 0]
+    browser_env.connect.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser", timeout=20000, no_defaults=True)
+    browser_env.browser.close.assert_called_once()
+    browser_env.target.submit.click.assert_not_called()
+
+
+def test_one_shot_honors_explicit_chrome_port(browser_env, capsys):
+    assert rovo_cli.run([*FLAGS, "--chrome-port", "9333", "status"]) == 0
+    assert json.loads(capsys.readouterr().out)["execution_status"] == "completed"
+    browser_env.connect.assert_called_once_with("ws://127.0.0.1:9333/devtools/browser", timeout=20000, no_defaults=True)
+    browser_env.browser.close.assert_called_once()
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "-1", "ws://other.example:9222", "9222/escape"])
+def test_invalid_explicit_chrome_port_is_rejected_before_attachment(browser_env, capsys, port):
+    assert rovo_cli.run([*FLAGS, "--chrome-port", port, "status"]) == 1
+    assert json.loads(capsys.readouterr().out)["submission_state"] == "not_attempted"
+    browser_env.connect.assert_not_called()
+
+
+def test_explicit_port_dry_run_never_attaches(browser_env, monkeypatch, capsys):
+    code, results = stream(monkeypatch, capsys, [], "--chrome-port", "9222", "--dry-run")
+    assert code == 0 and len(results) == 1 and results[0]["dry_run"] is True
+    browser_env.runtime.__enter__.assert_not_called()
+
+
+def test_stream_cannot_change_explicit_port(browser_env, monkeypatch, capsys):
+    code, results = stream(monkeypatch, capsys, [["--chrome-port", "9333", "status"], ["status"]], "--chrome-port", "9222")
+    assert code == 0 and [r["exit_code"] for r in results] == [0, 1, 0]
+    browser_env.connect.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser", timeout=20000, no_defaults=True)
+
+
+def test_explicit_port_failure_does_not_fall_back_to_another_endpoint(browser_env, monkeypatch, capsys):
+    browser_env.connect.side_effect = Error("Synthetic connection failure")
+    code, results = stream(monkeypatch, capsys, [["status"]], "--chrome-port", "9222")
+    assert code == 1 and len(results) == 1 and results[0]["error_code"] == "chrome_connection_failed"
+    browser_env.connect.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser", timeout=20000, no_defaults=True)
+
+
+def test_repl_retains_explicit_port_and_rejects_changing_it(browser_env, monkeypatch, capsys):
+    from cli_anything.rovo.utils import repl_skin
+
+    skin = MagicMock()
+    skin.get_input.side_effect = [" ".join([*FLAGS, "status"]),
+                                 " ".join([*FLAGS, "--chrome-port", "9333", "status"]), "exit"]
+    monkeypatch.setattr(repl_skin, "ReplSkin", lambda *args, **kwargs: skin)
+    rovo_cli.repl(9222)
+    results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(results) == 2 and results[0]["execution_status"] == "completed"
+    assert results[1]["execution_status"] == "error" and results[1]["submission_state"] == "not_attempted"
+    browser_env.connect.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser", timeout=20000, no_defaults=True)
+    browser_env.browser.close.assert_called_once()
+
+
 def test_startup_is_flushed_before_input_and_lock_released(browser_env, monkeypatch, tmp_path):
     class Output(io.StringIO):
         flushed = False

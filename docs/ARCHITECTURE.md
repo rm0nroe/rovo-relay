@@ -32,6 +32,8 @@ Completed means a response was obtained. It does not verify facts, prove GitHub 
 
 `BrowserConnection` retains only the Playwright runtime and browser connection. Tabs, panels, account and composer state are resolved per operation; site locks are absent while waiting for input. The owner never retries attachment. SIGINT/SIGTERM unwind the foreground session or human REPL; shutdown detaches once and attempts runtime cleanup even if detach fails. Sanitized cleanup notices go to stderr without replacing results or altering request records. This lifecycle does not resolve the unobserved Chrome approval failure or establish Copilot-host acceptance.
 
+By default the owner uses Playwright's Chrome channel discovery. Global `--chrome-port` selects a verified existing-browser loopback port and connects directly to its approval-mode WebSocket, avoiding both the missing discovery-file dependency and unsupported HTTP JSON discovery. Click validates the port range; arbitrary hosts and endpoint paths are not accepted. The port is immutable for a retained owner. There is no guessed port, automatic endpoint fallback or approval bypass.
+
 ## Components
 
 | Component | Responsibility |
