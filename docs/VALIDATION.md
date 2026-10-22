@@ -4,13 +4,23 @@
 
 The development baseline passed 20 unit and installed-command tests. They cover destination and identity validation, site locks, durable uncertain delivery, stale response rejection, output bounds, image policy, installed skill discovery, dry-run behavior and command validation. The clean repository passed all 20 tests after a fresh installation on 2026-10-21, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the test process launched outside the checkout. The wheel built successfully and its package files matched the sanitized source. No browser request is made by this suite.
 
+## Explicit Chrome port candidate (0.1.0a4)
+
+Enabled debugging on the local normal Chrome was listening while its `DevToolsActivePort` file was absent (`ENOENT`). Global `--chrome-port PORT` now connects to the verified existing browser's loopback WebSocket without relying on file or HTTP discovery. Default channel discovery remains unchanged. Chrome approval, per-operation binding and delivery checks, immutable connection ownership and no automatic retry/fallback remain in place. No discovery file, replacement browser or browser-policy change is created.
+
+On 2026-10-22, the installed 0.1.0a4 candidate passed all 144 offline tests outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`. All 12 packaged source/document files matched the checkout. New cases cover explicit-port attachment/reuse, one-shot and REPL routing, invalid-port refusal, dry-run without attachment, immutable stream/REPL ports and no endpoint fallback. The initial five explicit-port feature regressions failed before implementation.
+
+The installed candidate then passed two live account-bound status operations in one foreground process: startup status followed by one `["status"]` command. Both returned exit 0 and `readiness: authenticated_ui_read_only`, with `active_generation: null`. Private Playwright connection logs show exactly one connection and one disconnect; no disconnect occurred before stdin closed. The process exited 0, request-record hashes were unchanged and no Rovo question, prompt entry or upload occurred. The task-created tab and empty CLI state directory were removed; evidence stays outside Git.
+
+This accepts persistent read-only inspection on a local Chrome using an explicitly verified port. Mini-modal sends/list/export and generation/attachment/completion evidence remain unverified, as do Copilot acceptance and grounded retrieval. A successful local transport check does not expand those gates.
+
 ## Persistent session candidate (0.1.0a3)
 
 The foreground `session` and human REPL retain one lazy approved Chrome connection. Offline regressions cover repeated operation checks, site locks while idle, unresolved delivery before attachment, startup flushing, JSON argv framing, immutable binding, stdin protection, recoverable preparation errors, terminal uncertain sends and timeouts, EOF/signals, no reconnect and cleanup failures. They use in-process Click and synthetic Playwright doubles; no Chrome or Rovo request is made. Focused session regressions were observed failing before implementation, including later startup-schema and nested-REPL fixes. Installed subprocess checks cover doctor, session help and dry-run startup.
 
 On 2026-10-22, the installed 0.1.0a3 candidate passed all 132 offline tests with `CLI_ANYTHING_FORCE_INSTALLED=1`, its executable directory on PATH and the test process outside the checkout. Imports resolved to the installed package; all 12 packaged source/document files and three source mirror pairs matched byte for byte. `git diff --check` passed. Build and egg-info scaffolding was removed; private evidence stayed outside Git. No live browser connection or Rovo submission was attempted.
 
-Direct persistent attachment is not live-accepted. With an already-approved connection, the remaining read-only gate is two sequential status commands in one process, private evidence of one attachment and detach only at shutdown. Do not send a diagnostic question, approve debugging automatically, change browser protections or terminate user Chrome to test disconnects. The prior local handshake failure's approval hypothesis remains unconfirmed. Copilot acceptance and mini-modal generation/attachment/completion gates remain open; this lifecycle change does not expand mini-modal operations or automatic MCP eligibility.
+Direct persistent attachment was not live-accepted for 0.1.0a3; the 0.1.0a4 local read-only result is recorded above. Do not send a diagnostic question, approve debugging automatically, change browser protections or terminate user Chrome to test disconnects. The prior local handshake failure's approval hypothesis remains unconfirmed. Copilot acceptance and mini-modal generation/attachment/completion gates remain open; this lifecycle change does not expand mini-modal operations or automatic MCP eligibility.
 
 ## Panel compatibility candidate
 

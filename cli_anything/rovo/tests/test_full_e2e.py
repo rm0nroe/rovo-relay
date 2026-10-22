@@ -58,6 +58,14 @@ class TestCLISubprocess:
         assert result["dry_run"] is True and result["exit_code"] == 0
         assert "session" in json.loads(self.run("doctor").stdout)["implemented"]
 
+    def test_explicit_chrome_port_validation_and_dry_run(self):
+        args = ["--site", "https://example.atlassian.net", "--session", "probe", "--account", "user@example.com"]
+        output = self.run(*args, "--chrome-port", "9222", "--dry-run", "session")
+        assert output.returncode == 0, output.stderr
+        assert json.loads(output.stdout)["dry_run"] is True
+        output = self.run(*args, "--chrome-port", "65536", "--dry-run", "session")
+        assert output.returncode == 1 and json.loads(output.stdout)["submission_state"] == "not_attempted"
+
     def test_image_dry_run_and_rejection(self, tmp_path):
         prompt = tmp_path / "prompt.txt"
         prompt.write_text("Describe the image")

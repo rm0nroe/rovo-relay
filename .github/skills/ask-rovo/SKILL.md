@@ -4,11 +4,13 @@ description: Ask Rovo through the installed Rovo Relay CLI, with an existing per
 disable-model-invocation: true
 ---
 
-Requires installed `rovo-relay` 0.1.0a3 or newer, schema 1, and user-provided site/session/expected account. Run `rovo-relay --json doctor`; require `session` in implemented commands and, for MCP mode, `mcp_handoff: agent_tools_with_local_guard`. Do not claim authentication from doctor. Keep site, account and session unchanged through one request. Use an assigned browser session name where present.
+Requires installed `rovo-relay` 0.1.0a4 or newer, schema 1, and user-provided site/session/expected account. Run `rovo-relay --json doctor`; require `session` in implemented commands and, for MCP mode, `mcp_handoff: agent_tools_with_local_guard`. Do not claim authentication from doctor. Keep site, account and session unchanged through one request. Use an assigned browser session name where present.
 
 ## Choose a connection
 
 Start ONE foreground process with `rovo-relay --site SITE --session SESSION --account EMAIL session`. Retain its stdin/stdout handles across commands. Its first flushed JSON line is the startup status with `exit_code`; use it as the preflight instead of starting a separate status process. Never preload an ask before reading and evaluating startup. If the runtime cannot retain a process and its streams, report that limitation; do not claim approval reuse from separate invocations.
+
+If remote debugging is enabled but file discovery fails, use global `--chrome-port PORT` before `session` only when Chrome's debugging UI advertises that port or local process ownership proves it belongs to the intended normal Chrome. The connector uses a fixed loopback WebSocket, preserves Chrome approval and freezes the port for the connection. Do not guess ports, change profiles, fabricate discovery files or automatically switch endpoints after a failed attachment. Missing discovery is not proof debugging is disabled. One-shot commands accept the same global option.
 
 - If `readiness: authenticated_ui` and `retry_safe: true`, use direct CLI mode below.
 - If `readiness: authenticated_ui_read_only` or `error_code: rovo_layout_unverified`, stop before ask, list or export. Mini-modal status confirms only the account, panel and visible composer; `active_generation: null` means unknown, even with `retry_safe: true`. Its `Message sent.` label does not prove completion. Do not send or switch transports to bypass this limit. Missing generation/attachment-state and completion-transition evidence must come from read-only observation, without conversation/account text or a new diagnostic question.

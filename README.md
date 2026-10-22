@@ -28,7 +28,7 @@ python -m pip install .
 rovo-relay --json doctor
 ```
 
-The command can then run from any directory while that environment is active. Version 0.1.0a3 adds persistent sessions; direct attachment and reuse under Copilot still need live acceptance. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
+The command can then run from any directory while that environment is active. Version 0.1.0a3 adds persistent sessions; 0.1.0a4 adds explicit loopback port selection when Chrome lacks a discovery file. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
 
 
 ### Chrome connection setup
@@ -40,6 +40,8 @@ Run the CLI in the same OS and user environment as normal Chrome. The adapter us
 `DevToolsActivePort file not found` means discovery could not read the connection file. It does not prove an authentication or GitHub failure, or by itself identify whether debugging is disabled, the browser is unsupported, or the runtime is looking in a different environment. The CLI now returns `error_code: chrome_debugging_unavailable` and `next_steps` without exposing the local profile path. Do not create that file manually or launch a replacement browser with debugging flags. Enable the supported setting if permitted, then retry only `status`. If it still fails, provide the browser version/channel, runtime environment and setting state using the setup prompt's blocker report.
 
 Other attachment failures return `chrome_connection_failed`, sanitized guidance and measured `attachment_elapsed_ms`. Pending approval is a possible cause, not a confirmed diagnosis. This error does not automatically qualify for MCP fallback. A lost established connection returns `chrome_connection_lost`; sessions never reconnect automatically.
+
+Debugging can be enabled and listening even when `DevToolsActivePort` is absent. In that case, pass global `--chrome-port PORT` before the command, using the port shown by Chrome's debugging UI or independently verified as owned by the intended normal Chrome process. This connects directly to `ws://127.0.0.1:PORT/devtools/browser` without file or HTTP discovery; Chrome's approval still applies. Only ports 1 through 65535 are accepted. Do not guess ports, use another profile, create the discovery file or restart Chrome with debugging flags. With no port supplied, normal channel discovery is unchanged. An explicit-port failure stops without falling back to another endpoint.
 
 ## First use
 
@@ -64,7 +66,7 @@ rovo-relay --site https://example.atlassian.net \
   --session pilot --account user@example.com session
 ```
 
-The process attaches lazily after checking the site's delivery guard, runs one startup status and flushes its schema-1 JSON result with `exit_code`. Wait for that result before writing commands. A nonzero startup code ends the process. The initial approval is still required; keeping the process alive avoids a new attachment for every command.
+If file discovery fails while debugging is enabled, add `--chrome-port PORT` before `session` using the verified port described above. The process attaches lazily after checking the site's delivery guard, runs one startup status and flushes its schema-1 JSON result with `exit_code`. Wait for that result before writing commands. A nonzero startup code ends the process. The initial approval is still required; keeping the process alive avoids a new attachment for every command. The selected Chrome port is fixed for that connection, including in the REPL.
 
 Send one JSON argv array per line on stdin. For example, `["status"]` performs another read-only check. After send readiness, available credits and user authorization are established, `["ask", "--prompt-file", "/path/to/question.txt"]` uses the same connection. Existing `chat list`, `chat export` and ask options use their usual argv form. Keep the process's stdin open between commands; closing it ends the session. Do not start a separate status/ask process for each step.
 

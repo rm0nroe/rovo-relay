@@ -1,7 +1,7 @@
 from setuptools import find_namespace_packages, setup
 
 setup(
-    name="rovo-relay", version="0.1.0a3",
+    name="rovo-relay", version="0.1.0a4",
     description="Experimental Rovo browser harness built using CLI-Anything",
     packages=find_namespace_packages(include=["cli_anything.*"], exclude=["*.tests"]),
     package_data={"cli_anything.rovo": ["skills/*.md", "README.md"]},

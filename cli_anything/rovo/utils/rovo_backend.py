@@ -16,7 +16,8 @@ from cli_anything.rovo.core.state import (
 class BrowserConnection:
     """Own one lazy CDP attachment; an attempted connection is never retried."""
 
-    def __init__(self):
+    def __init__(self, chrome_port=None):
+        self.chrome_port = chrome_port
         self.browser = None
         self.runtime = None
         self.attempted = False
@@ -35,7 +36,9 @@ class BrowserConnection:
             try:
                 self.runtime = sync_playwright()
                 pw = self.runtime.__enter__()
-                self.browser = pw.chromium.connect_over_cdp("chrome", timeout=20000, no_defaults=True)
+                # Approval-mode Chrome can listen without a discovery file or JSON endpoint.
+                endpoint = f"ws://127.0.0.1:{self.chrome_port}/devtools/browser" if self.chrome_port else "chrome"
+                self.browser = pw.chromium.connect_over_cdp(endpoint, timeout=20000, no_defaults=True)
             except (Exception, KeyboardInterrupt) as error:
                 self.failed = True
                 missing = isinstance(error, PlaywrightError) and "DevToolsActivePort file not found" in str(error)
@@ -45,6 +48,7 @@ class BrowserConnection:
                     "next_steps": [
                         "Use Chrome 144+ in the same OS and user environment as this CLI; WSL, containers and remote terminals do not automatically discover host Chrome.",
                         "In that Chrome, open chrome://inspect/#remote-debugging and explicitly enable remote debugging if permitted by your organization.",
+                        "Enabled debugging can lack a discovery file. If Chrome advertises a port, or its ownership by the intended local Chrome is verified, pass --chrome-port PORT; do not guess a port.",
                         "Keep Chrome visible and approve its connection prompt yourself within the 20-second attachment window. Pending approval is one possible cause, not a confirmed diagnosis.",
                         "If unavailable or still failing, report Chrome version/channel, CLI environment and whether the setting is managed; do not change policy or create a DevToolsActivePort file.",
                     ],
@@ -96,7 +100,7 @@ def require_idle(panel):
 
 
 def operate(origin, session, account, prompt=None, timeout=180, images=(), github_source=None,
-            chat_id=None, action="status", connection=None):
+            chat_id=None, action="status", connection=None, chrome_port=None):
     allowed_prefixes = (origin + "/jira/", origin + "/browse/")
     directory = state_dir(Path.home(), origin, session)
     record = {"request_id": str(uuid4()), "site": origin, "account": account, "chat_id": chat_id,
@@ -112,7 +116,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
             if blocked:
                 return base | blocked | {"execution_status": "blocked", "retry_safe": False,
                                       "message": "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions."}, 4
-            with (nullcontext(connection) if connection is not None else BrowserConnection()) as owner:
+            with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port)) as owner:
                 browser = owner.get()
                 pages = [p for context in browser.contexts for p in context.pages
                          if p.url.startswith(allowed_prefixes)]
