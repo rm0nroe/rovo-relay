@@ -50,7 +50,7 @@ def test_request_survives_failure_and_unknown_delivery_blocks(tmp_path):
 def test_terminal_status_without_observed_start_is_not_completion():
     good = dict(started=True, count=1, status="Response complete.", generating=False, answer="ok")
     assert completed_turn(**good)
-    for change in [dict(started=False), dict(count=0), dict(status="Rovo is thinking"), dict(generating=True), dict(answer=" "), dict(before=1), dict(prompt_matches=False)]:
+    for change in [dict(started=False), dict(count=0), dict(status="Rovo is thinking"), dict(status="Message sent."), dict(generating=True), dict(answer=" "), dict(before=1), dict(prompt_matches=False)]:
         assert not completed_turn(**(good | change))
 
 

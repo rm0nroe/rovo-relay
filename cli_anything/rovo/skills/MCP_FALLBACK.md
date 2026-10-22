@@ -8,7 +8,9 @@ Inspect available tool schemas and permitted configuration; do not expose tokens
 
 Use only the existing allowed connection. If a call would need a new browser/profile, extension, permission or configuration change, stop and report that requirement. Listing tabs can start a browser in some configurations: check connection mode first. If the tool cannot establish this, do not assume it is the user's Chrome.
 
-List/select exactly one existing Jira tab whose origin equals SITE and path starts `/jira/`. Inspect only that tab. Confirm the expected account and visible Rovo panel; decline a different account, duplicate matching tabs, an unknown identity or an unrelated browser. Never use cookies as identity evidence. Do not submit a question just to test access.
+List existing tabs whose origin equals SITE and path starts `/jira/` or `/browse/`. Inspect panel visibility on those tabs and select the only one with a visible Rovo panel, regardless of which Chrome tab is foreground. Stop if no eligible tab exists, no panel is visible, or multiple panels are visible; ask the user to leave Rovo open only in the intended tab while preserving drafts. On the selected tab, confirm the expected account; decline a different account, an unknown identity or an unrelated browser. Keep that tab for the operation; recheck its origin and allowed path before submission and during response monitoring, and never switch tabs after an error or navigation. Never use cookies as identity evidence. Do not submit a question just to test access.
+
+An empty composer or disabled New chat button does not prove that a UI variant is safe. Verify its generation, attachment and completion controls before any chat action; do not use MCP to bypass direct `authenticated_ui_read_only` readiness or a `rovo_layout_unverified` result. Mini-modal status leaves generation unknown; its `Message sent.` label is not completion evidence.
 
 Read-only user requests (status, loaded chat listing/export) need no send reservation, but must still obey identity, draft and uncertainty safeguards. Report MCP inspection as such, not as a successful CLI status.
 
