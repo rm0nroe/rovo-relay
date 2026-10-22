@@ -1,4 +1,4 @@
-"""Rovo Relay: first existing-browser slice."""
+"""Rovo Relay CLI: first existing-browser slice."""
 import importlib.metadata
 import json
 import os
@@ -255,7 +255,7 @@ def session(ctx):
 
 def repl(chrome_port=None):
     from cli_anything.rovo.utils.repl_skin import ReplSkin
-    skin = ReplSkin("rovo-relay", version=__version__, history_file=os.devnull)
+    skin = ReplSkin("rovo-relay-cli", version=__version__, history_file=os.devnull)
     skin.skill_install_cmd = "Copy the packaged skills directory into .github/skills/ask-rovo (including MCP_FALLBACK.md)"
     skin.print_banner()
     prompt = skin.create_prompt_session()

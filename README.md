@@ -1,4 +1,4 @@
-# Rovo Relay
+# Rovo Relay CLI
 
 An experimental local command that lets a coding agent ask Rovo through an existing signed-in Chrome session. Direct browser interaction and waiting happen inside Playwright; the agent receives a bounded JSON result. The `/ask-rovo` skill can automatically use Copilot's existing permitted Playwright MCP session when direct Chrome attachment is blocked before submission. Built using the CLI-Anything workflow, Python/Click and the upstream ReplSkin. This is not an official Atlassian or HKUDS client.
 
@@ -25,15 +25,15 @@ From the cloned repository, on macOS or Linux:
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install .
-rovo-relay --json doctor
+rovo-relay-cli --json doctor
 ```
 
-The command can then run from any directory while that environment is active. Version 0.1.0a3 adds persistent sessions; 0.1.0a4 adds explicit loopback port selection when Chrome lacks a discovery file. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
+The command can then run from any directory while that environment is active. Version 0.1.0a5 names the command `rovo-relay-cli`; `rovo-relay` remains a compatibility alias. The Python distribution remains `rovo-relay`, so upgrading the existing installation replaces the same package. Version 0.1.0a3 adds persistent sessions; 0.1.0a4 adds explicit loopback port selection when Chrome lacks a discovery file. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
 
 
 ### Chrome connection setup
 
-Opening Jira and signing in does not enable browser automation. This connection mode requires Chrome 144+ with remote debugging explicitly enabled in `chrome://inspect/#remote-debugging`. Keep Chrome open, run the account-bound `status` command, and approve Chrome's connection prompt yourself. The permission covers the Chrome session, not only Rovo. Follow your organization's policy; if the setting is unavailable or managed, report it instead of bypassing it. See [Chrome's documented setup](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session). No MCP installation is needed by Rovo Relay.
+Opening Jira and signing in does not enable browser automation. This connection mode requires Chrome 144+ with remote debugging explicitly enabled in `chrome://inspect/#remote-debugging`. Keep Chrome open, run the account-bound `status` command, and approve Chrome's connection prompt yourself. The permission covers the Chrome session, not only Rovo. Follow your organization's policy; if the setting is unavailable or managed, report it instead of bypassing it. See [Chrome's documented setup](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session). No MCP installation is needed by Rovo Relay CLI.
 
 Run the CLI in the same OS and user environment as normal Chrome. The adapter uses Playwright's `chrome` channel discovery for the default Chrome data location; WSL, containers, remote terminals, other Chrome channels and custom data locations are not automatically matched to the host browser.
 
@@ -48,7 +48,7 @@ Debugging can be enabled and listening even when `DevToolsActivePort` is absent.
 Sign in normally and open Rovo in the intended site's `/jira/` or `/browse/` tab. Other tabs may stay open: the adapter selects the only eligible tab with a visible Rovo panel, regardless of which Chrome tab is foreground. If multiple eligible tabs have Rovo open, it stops; leave the panel open only in the intended tab without discarding drafts. Requests require an idle composer; preserve existing drafts and attachments. Substitute your own site and account below; examples contain no configured account.
 
 ```sh
-rovo-relay --json \
+rovo-relay-cli --json \
   --site https://example.atlassian.net/jira \
   --session pilot --account user@example.com status
 ```
@@ -62,7 +62,7 @@ The browser permission grants access to the Chrome session. The adapter limits i
 Keep one foreground process alive for the whole interaction:
 
 ```sh
-rovo-relay --site https://example.atlassian.net \
+rovo-relay-cli --site https://example.atlassian.net \
   --session pilot --account user@example.com session
 ```
 
@@ -77,7 +77,7 @@ Every operation rechecks delivery state, eligible tabs, unique panel, account an
 For a one-shot operation, write a question to a private local UTF-8 file, then:
 
 ```sh
-rovo-relay --json \
+rovo-relay-cli --json \
   --site https://example.atlassian.net/jira \
   --session pilot --account user@example.com \
   ask --prompt-file question.txt
@@ -109,7 +109,7 @@ Global `--dry-run` validates inputs without contacting the browser or writing re
 | 3 | Timeout or interruption; delivery may be uncertain |
 | 4 | Prior uncertain request blocks another ask |
 
-A site-level lock serializes this harness's commands. It cannot prevent another agent or a person from changing the tab. Request metadata is stored beneath the current user's home in `.cli-anything-rovo/SITE/SESSION/`; MCP reservations use `.cli-anything-rovo/SITE/.mcp/`. An uncertain attempt blocks another send across all sessions and both transports on that site. Do not delete records, remove locks or change session names to bypass that guard. Inspect the exact remote conversation before manual recovery. Automated reconciliation is not implemented.
+A site-level lock serializes this harness's commands. It cannot prevent another agent or a person from changing the tab. Both command names intentionally share the original state directory so renaming cannot bypass unresolved delivery. Request metadata is stored beneath the current user's home in `.cli-anything-rovo/SITE/SESSION/`; MCP reservations use `.cli-anything-rovo/SITE/.mcp/`. An uncertain attempt blocks another send across all sessions and both transports on that site. Do not delete records, remove locks or change session names to bypass that guard. Inspect the exact remote conversation before manual recovery. Automated reconciliation is not implemented.
 
 ## Copilot
 

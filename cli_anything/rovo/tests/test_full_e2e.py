@@ -12,13 +12,13 @@ def _resolve_cli(name):
     if path:
         return [path]
     if os.getenv("CLI_ANYTHING_FORCE_INSTALLED") == "1":
-        raise RuntimeError("Install rovo-relay and put it on PATH first.")
+        raise RuntimeError("Install rovo-relay-cli and put it on PATH first.")
     return [sys.executable, "-m", "cli_anything.rovo"]
 
 
 class TestCLISubprocess:
-    def run(self, *args):
-        return subprocess.run(_resolve_cli("rovo-relay") + list(args), text=True, capture_output=True, timeout=10)
+    def run(self, *args, command="rovo-relay-cli"):
+        return subprocess.run(_resolve_cli(command) + list(args), text=True, capture_output=True, timeout=10)
 
     def test_doctor_and_packaged_skill(self):
         output = self.run("--json", "doctor")
@@ -101,7 +101,7 @@ class TestCLISubprocess:
         assert output.returncode == 0
         assert json.loads(output.stdout)["chat_id"] == "12345678-1234-4234-8234-123456789abc"
 
-    def test_installed_mcp_handoff_preserves_pending_delivery(self, tmp_path, monkeypatch):
+    def test_installed_mcp_handoff_shares_pending_delivery_with_legacy_alias(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         prompt = tmp_path / "prompt.txt"
@@ -114,7 +114,7 @@ class TestCLISubprocess:
         output = self.run(*args, *begin)
         assert output.returncode == 0, output.stdout
         record = json.loads(output.stdout)
-        repeated = self.run(*args, *begin)
+        repeated = self.run(*args, *begin, command="rovo-relay")
         assert repeated.returncode == 4
         assert json.loads(repeated.stdout)["retry_safe"] is False
         proof = tmp_path / "completion.json"
