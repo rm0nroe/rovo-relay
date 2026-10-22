@@ -4,7 +4,9 @@ import json
 import os
 import platform
 import shlex
+import signal
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import click
@@ -12,7 +14,7 @@ import click
 from cli_anything.rovo import __version__
 from cli_anything.rovo.core.state import load_images, validate_target
 from cli_anything.rovo.core.handoff import begin_handoff, finish_handoff
-from cli_anything.rovo.utils.rovo_backend import operate
+from cli_anything.rovo.utils.rovo_backend import BrowserConnection, operate
 
 
 @click.group(invoke_without_command=True)
@@ -24,11 +26,12 @@ from cli_anything.rovo.utils.rovo_backend import operate
 @click.pass_context
 def cli(ctx, json_mode, site, session, account, dry_run):
     """Experimental existing-Chrome bridge. See packaged skill for implemented scope."""
-    ctx.obj = dict(site=site, session=session, account=account, dry_run=dry_run)
+    ctx.obj = dict(site=site, session=session, account=account, dry_run=dry_run,
+                   connection=(ctx.obj or {}).get("connection"))
     if ctx.invoked_subcommand is None:
-        if json_mode or not sys.stdin.isatty():
-            raise click.UsageError("Choose doctor, status, chat or ask for noninteractive use.")
-        repl()
+        if ctx.obj["connection"] is not None or json_mode or not sys.stdin.isatty():
+            raise click.UsageError("Choose doctor, session, status, chat or ask for noninteractive use.")
+        return repl()
 
 
 @cli.command()
@@ -38,7 +41,7 @@ def doctor():
             "python": platform.python_version(), "platform": platform.system(),
             "playwright": importlib.metadata.version("playwright"),
             "skill_path": str(Path(__file__).parent / "skills" / "SKILL.md"),
-            "authenticated": "not_checked", "implemented": ["doctor", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)"],
+            "authenticated": "not_checked", "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)"],
             "mcp_handoff": "agent_tools_with_local_guard",
             "browser_requirement": "Direct mode needs approved Chrome debugging; skill fallback needs an already-permitted Playwright MCP session"}, 0
 
@@ -56,7 +59,7 @@ def status(ctx):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "site": args[0]}, 0
-    return operate(*args)
+    return operate(*args, connection=ctx.obj.get("connection"))
 
 
 @cli.command()
@@ -79,7 +82,7 @@ def ask(ctx, prompt_file, timeout, image, github_source, chat):
                 "image_count": len(images), "image_bytes": sum(len(item["buffer"]) for item in images),
                 "github_source_requested": github_source, "chat_id": str(chat) if chat else None}, 0
     return operate(*args, prompt=prompt, timeout=timeout, images=images, github_source=github_source,
-                   chat_id=str(chat) if chat else None)
+                   chat_id=str(chat) if chat else None, connection=ctx.obj.get("connection"))
 
 
 @cli.group()
@@ -93,7 +96,7 @@ def chat_list(ctx):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "action": "chat_list"}, 0
-    return operate(*args, action="chat_list")
+    return operate(*args, action="chat_list", connection=ctx.obj.get("connection"))
 
 
 @chat.command("export")
@@ -103,7 +106,7 @@ def chat_export(ctx, chat_id):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "chat_id": str(chat_id)}, 0
-    return operate(*args, action="chat_export", chat_id=str(chat_id))
+    return operate(*args, action="chat_export", chat_id=str(chat_id), connection=ctx.obj.get("connection"))
 
 
 @cli.group()
@@ -149,20 +152,101 @@ def mcp_finish(ctx, evidence_file):
                 "retry_safe": False, "message": "Completion evidence is invalid, mismatched or incomplete. Leave the request blocked; do not resubmit."}, 4
 
 
-def run(args):
+def preparation_error(error):
+    return {"schema_version": 1, "execution_status": "error", "message": str(error),
+            "submission_state": "not_attempted", "retry_safe": True}, 1
+
+
+def invoke(args, command=cli, obj=None):
     try:
-        result = cli.main(args=args, standalone_mode=False)
-        if result is None or isinstance(result, int):
-            return 0
-        payload, code = result
+        return command.main(args=args, obj=obj, standalone_mode=False)
     except (click.ClickException, ValueError, OSError) as error:
-        payload, code = {"schema_version": 1, "execution_status": "error", "message": str(error),
-                         "submission_state": "not_attempted", "retry_safe": True}, 1
-    except KeyboardInterrupt:
-        payload, code = {"schema_version": 1, "execution_status": "interrupted",
-                         "submission_state": "attempted_unknown", "retry_safe": False}, 3
-    print(json.dumps(payload, ensure_ascii=False))
+        return preparation_error(error)
+    except (KeyboardInterrupt, click.Abort):
+        return {"schema_version": 1, "execution_status": "interrupted",
+                "submission_state": "attempted_unknown", "retry_safe": False}, 3
+
+
+def emit(result, stream=False):
+    payload, code = result
+    print(json.dumps(payload | ({"exit_code": code} if stream else {}), ensure_ascii=False), flush=True)
     return code
+
+
+def run(args):
+    result = invoke(args)
+    return emit(result) if isinstance(result, tuple) else result or 0
+
+
+@contextmanager
+def foreground_connection():
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+
+    previous = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        with BrowserConnection() as connection:
+            yield connection
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def terminal(result, connection):
+    payload, code = result
+    return (connection.failed or code in (2, 3, 4)
+            or (code != 0 and payload.get("submission_state") != "not_attempted"))
+
+
+def stream_command(line, config):
+    try:
+        args = json.loads(line)
+        if (not isinstance(args, list) or not args or not all(isinstance(arg, str) for arg in args)
+                or args[0] not in ("status", "ask", "chat") or "--help" in args or "-h" in args
+                or (args[0] == "chat" and (len(args) < 2 or args[1] not in ("list", "export")))):
+            raise ValueError("Expected a JSON argv array for status, ask or chat list/export, without help or global overrides.")
+        if any(arg == "--prompt-file=-" or (arg == "--prompt-file" and args[i + 1:i + 2] == ["-"])
+               for i, arg in enumerate(args)):
+            raise ValueError("Session stdin belongs to the command stream; use a private prompt file.")
+    except ValueError as error:
+        return preparation_error(error)
+    return invoke(args[1:], command=cli.commands[args[0]], obj=config)
+
+
+@cli.command()
+@click.pass_context
+def session(ctx):
+    """Retain one approved Chrome connection; read JSON argv arrays, emit JSON lines."""
+    try:
+        target(ctx)
+    except ValueError as error:
+        return emit(preparation_error(error), stream=True)
+    if ctx.obj.get("connection") is not None:
+        raise click.UsageError("A foreground session is already active.")
+    if ctx.obj["dry_run"]:
+        return emit(invoke([], command=status, obj=ctx.obj), stream=True)
+    with foreground_connection() as connection:
+        config = ctx.obj | {"connection": connection}
+        result = invoke([], command=status, obj=config)
+        emit(result, stream=True)
+        if result[1]:
+            return result[1]
+        while True:
+            try:
+                line = sys.stdin.readline()
+                if not line:
+                    return 0
+                result = stream_command(line, config)
+            except (KeyboardInterrupt, click.Abort):
+                result = ({"schema_version": 1, "execution_status": "interrupted",
+                           "submission_state": "not_attempted", "retry_safe": True}, 3)
+            except Exception:
+                result = ({"schema_version": 1, "execution_status": "error",
+                           "message": "Command stream failed; inspect local state without resubmitting.",
+                           "submission_state": "attempted_unknown", "retry_safe": False}, 1)
+            emit(result, stream=True)
+            if terminal(result, connection):
+                return result[1]
 
 
 def repl():
@@ -171,23 +255,33 @@ def repl():
     skin.skill_install_cmd = "Copy the packaged skills directory into .github/skills/ask-rovo (including MCP_FALLBACK.md)"
     skin.print_banner()
     prompt = skin.create_prompt_session()
-    while True:
-        try:
-            line = skin.get_input(prompt)
-            if line in ("quit", "exit"):
+    code = 0
+    with foreground_connection() as connection:
+        while True:
+            try:
+                line = skin.get_input(prompt)
+                if line in ("quit", "exit"):
+                    break
+                if line == "help":
+                    skin.help({"doctor": "Runtime and skill path", "status": "Check existing Rovo tab",
+                               "ask": "New-chat text prompt; use --prompt-file", "quit": "Exit"})
+                elif line:
+                    args = shlex.split(line)
+                    if args:
+                        result = invoke(args, obj={"connection": connection})
+                        if isinstance(result, tuple):
+                            code = emit(result)
+                            if terminal(result, connection):
+                                break
+            except EOFError:
                 break
-            if line == "help":
-                skin.help({"doctor": "Runtime and skill path", "status": "Check existing Rovo tab",
-                           "ask": "New-chat text prompt; use --prompt-file", "quit": "Exit"})
-            elif line:
-                args = shlex.split(line)
-                if args:
-                    run(args)
-        except (EOFError, KeyboardInterrupt):
-            break
-        except ValueError as error:
-            skin.error(str(error))
+            except KeyboardInterrupt:
+                code = 3
+                break
+            except ValueError as error:
+                skin.error(str(error))
     skin.print_goodbye()
+    return code
 
 
 def main():
