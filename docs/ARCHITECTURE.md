@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-  A[VS Code agent and on-demand skill] --> B[Click CLI or REPL]
+  A[VS Code agent and on-demand skill] --> B[Click CLI, foreground session or REPL]
   A --> H[Existing permitted Playwright MCP]
   H --> E
   A --> I[Local MCP begin and finish guard]
@@ -19,12 +19,18 @@ CLI-Anything supplies the development methodology and REPL presentation. The ins
 ## Request lifecycle
 
 1. Validate the HTTPS Atlassian origin, expected email, session, prompt and optional PNG bytes. Source examples and fixtures use synthetic identities.
-2. Acquire the site-level lock, inspect any prior uncertain delivery, connect to approved Chrome and find same-site tabs whose paths start `/jira/` or `/browse/`. Bind the only tab with a visible Rovo panel and verify the expected account. No eligible tab, no visible panel or multiple visible panels stops the operation. Keep the selected tab and enforce the same URL prefixes before submission and during response monitoring.
+2. Acquire the site-level lock, inspect any prior uncertain delivery, acquire the approved Chrome connection and find same-site tabs whose paths start `/jira/` or `/browse/`. One-shot operations own a lazy connection; a foreground session or REPL supplies its retained owner. Attachment happens only after the delivery guard. Bind the only tab with a visible Rovo panel and verify the expected account anew for each operation. No eligible tab, no visible panel or multiple visible panels stops the operation. Keep the selected tab and enforce the same URL prefixes before submission and during response monitoring.
 3. Resolve the same unique visible legacy or mini-modal root for discovery and operations. Hidden roots are ignored; multiple visible roots, including nested roots, are ambiguous. The mini-modal permits only account-bound status with one visible composer: `readiness: authenticated_ui_read_only` and `active_generation: null`. Ask, list and export stop with `rovo_layout_unverified`. Observed response-card/message-group selectors are compatible, but the mini-modal status label `Message sent.` is not terminal response evidence; generation, attachment-state handling and completion transitions remain unverified. Legacy sends require one visible enabled composer and an enabled New chat control when starting a conversation. Preserve existing drafts. Start a new chat or reopen a loaded conversation by its observed UUID; optionally verify GitHub source selection and image cards before sending.
 4. Persist attempted-unknown state before clicking Submit once. Observe generation start, a response count above the baseline, the matching latest user prompt, exact completion status and no Stop generating button.
-5. Save completion or timeout state, emit bounded JSON, release the lock and disconnect without closing the external Chrome browser or its tabs.
+5. Save completion or timeout state and release the lock. One-shot commands detach before returning; persistent sessions keep the connection between commands and detach at shutdown. Emit bounded JSON without closing the external Chrome browser or its tabs.
 
 Completed means a response was obtained. It does not verify facts, prove GitHub retrieval or enforce read-only behavior. Uncertain delivery is never automatically resubmitted.
+
+## Foreground session
+
+`session` freezes site/account/request-session/dry-run policy, emits an initial status and reads JSON argv arrays from stdin. Existing Click handlers parse status, ask and chat commands; every result is schema 1 with a flushed `exit_code`. Help, MCP, nested sessions, global overrides and stdin prompt files are rejected. Invalid input or preparation errors are recoverable. Authentication failure, blocked delivery, interruption, lost connection and unsuccessful possibly-submitted operations terminate the stream. A completed ask can continue despite `retry_safe: false` without resending that turn. EOF makes no browser request; dry-run session emits once without attachment or reading input.
+
+`BrowserConnection` retains only the Playwright runtime and browser connection. Tabs, panels, account and composer state are resolved per operation; site locks are absent while waiting for input. The owner never retries attachment. SIGINT/SIGTERM unwind the foreground session or human REPL; shutdown detaches once and attempts runtime cleanup even if detach fails. Sanitized cleanup notices go to stderr without replacing results or altering request records. This lifecycle does not resolve the unobserved Chrome approval failure or establish Copilot-host acceptance.
 
 ## Components
 

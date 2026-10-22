@@ -4,11 +4,11 @@ description: Ask Rovo through the installed Rovo Relay CLI, with an existing per
 disable-model-invocation: true
 ---
 
-Requires installed `rovo-relay` 0.1.0a2 or newer, schema 1, and user-provided site/session/expected account. Run `rovo-relay --json doctor`; MCP mode requires `mcp_handoff: agent_tools_with_local_guard`. Do not claim authentication from doctor. Keep site, account and session unchanged through one request. Use an assigned browser session name where present.
+Requires installed `rovo-relay` 0.1.0a3 or newer, schema 1, and user-provided site/session/expected account. Run `rovo-relay --json doctor`; require `session` in implemented commands and, for MCP mode, `mcp_handoff: agent_tools_with_local_guard`. Do not claim authentication from doctor. Keep site, account and session unchanged through one request. Use an assigned browser session name where present.
 
 ## Choose a connection
 
-Run `rovo-relay --json --site SITE --session SESSION --account EMAIL status` before submitting.
+Start ONE foreground process with `rovo-relay --site SITE --session SESSION --account EMAIL session`. Retain its stdin/stdout handles across commands. Its first flushed JSON line is the startup status with `exit_code`; use it as the preflight instead of starting a separate status process. Never preload an ask before reading and evaluating startup. If the runtime cannot retain a process and its streams, report that limitation; do not claim approval reuse from separate invocations.
 
 - If `readiness: authenticated_ui` and `retry_safe: true`, use direct CLI mode below.
 - If `readiness: authenticated_ui_read_only` or `error_code: rovo_layout_unverified`, stop before ask, list or export. Mini-modal status confirms only the account, panel and visible composer; `active_generation: null` means unknown, even with `retry_safe: true`. Its `Message sent.` label does not prove completion. Do not send or switch transports to bypass this limit. Missing generation/attachment-state and completion-transition evidence must come from read-only observation, without conversation/account text or a new diagnostic question.
@@ -18,11 +18,15 @@ Run `rovo-relay --json --site SITE --session SESSION --account EMAIL status` bef
 
 If MCP is unavailable or cannot access the approved session, report the blocker without installing/reconfiguring tools, creating another browser or changing policy. The direct route's supported prerequisite is Chrome 144+ with explicit enablement at `chrome://inspect/#remote-debugging` in the same OS/user environment as the CLI; the user approves the browser prompt. Do not fabricate DevToolsActivePort or add launch flags as a workaround.
 
+`chrome_connection_failed` includes measured attachment time and sanitized guidance. Pending approval is only a possible cause; a generic failure does not automatically expand MCP eligibility. Failed startup exits immediately. An established connection lost with `chrome_connection_lost` ends the session without reconnecting. Do not relaunch an ask after a missing or uncertain result.
+
 ## Direct CLI mode
 
-Write the user's question as data to a private UTF-8 file. Run the same global flags with `ask --prompt-file PATH`; do not interpolate prompt content into shell syntax. `--dry-run` validates without browser changes. Ask starts a new chat unless `--chat UUID` names an observed conversation.
+Write the user's question as data to a private UTF-8 file. Send `["ask", "--prompt-file", "PATH"]` as one JSON line to the retained process; serialize argv as JSON, never interpolate prompt content into shell syntax. Read its one flushed JSON response before another command. Do not use `--prompt-file -` or `--prompt-file=-`; stdin belongs to the command stream. Site/account/session/dry-run flags cannot change inside it. Global `--dry-run session` validates startup only and exits without attachment or input. Ask starts a new chat unless `--chat UUID` names an observed conversation.
 
-Use `chat list` to obtain observed IDs, `ask --chat UUID` for follow-up, or `chat export --chat UUID` for loaded user/assistant text (24,000-character cap). Add repeatable `--image PATH.png` only for approved files (four maximum, 5 MiB each). `--github-source on|off` changes the chat filter, not connector permissions or indexing. Keep private outputs outside Git.
+Use `["status"]` for another check, `["chat", "list"]` to obtain observed IDs, ask with `--chat UUID` for follow-up, or `["chat", "export", "--chat", "UUID"]` for loaded user/assistant text (24,000-character cap). Add repeatable `--image PATH.png` only for approved files (four maximum, 5 MiB each). `--github-source on|off` changes the chat filter, not connector permissions or indexing. Keep private outputs outside Git.
+
+Preparation errors may be corrected in the same process after inspecting the result and retained draft. Authentication failure, delivery blocking, interruption, disconnect and unsuccessful possibly-submitted operations terminate it. A successful completed ask with `retry_safe: false` can be followed by a distinct authorized command, never a resend of that turn. Close stdin when finished and wait for process exit so it detaches. There is no daemon, automatic reconnect or approval bypass. Mini-modal sends/list/export remain blocked even when the startup status succeeds.
 
 ## Shared boundaries
 

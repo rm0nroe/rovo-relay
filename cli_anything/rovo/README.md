@@ -10,7 +10,7 @@ This is an experimental, unofficial client. See the validation notes before live
 - Follow-up questions using an observed conversation ID.
 - Loaded conversation listing and bounded text exports.
 - Exact site/account checks, draft preservation and conservative uncertain-delivery handling.
-- Installable command, interactive REPL and an on-demand Copilot skill.
+- Installable command, persistent foreground JSON-lines session, interactive REPL and an on-demand Copilot skill.
 - Agent-mediated MCP fallback with durable local delivery guards (offline-tested; live acceptance pending).
 
 Live browser tests passed on one development Mac. Actual GitHub file retrieval failed on that test site. Headless execution, other machines and invocation from VS Code Copilot remain unverified. See [validation](docs/VALIDATION.md).
@@ -28,7 +28,7 @@ python -m pip install .
 rovo-relay --json doctor
 ```
 
-The command can then run from any directory while that environment is active. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
+The command can then run from any directory while that environment is active. Version 0.1.0a3 adds persistent sessions; direct attachment and reuse on the target machine still need live acceptance. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
 
 
 ### Chrome connection setup
@@ -38,6 +38,8 @@ Opening Jira and signing in does not enable browser automation. This connection 
 Run the CLI in the same OS and user environment as normal Chrome. The adapter uses Playwright's `chrome` channel discovery for the default Chrome data location; WSL, containers, remote terminals, other Chrome channels and custom data locations are not automatically matched to the host browser.
 
 `DevToolsActivePort file not found` means discovery could not read the connection file. It does not prove an authentication or GitHub failure, or by itself identify whether debugging is disabled, the browser is unsupported, or the runtime is looking in a different environment. The CLI now returns `error_code: chrome_debugging_unavailable` and `next_steps` without exposing the local profile path. Do not create that file manually or launch a replacement browser with debugging flags. Enable the supported setting if permitted, then retry only `status`. If it still fails, provide the browser version/channel, runtime environment and setting state using the setup prompt's blocker report.
+
+Other attachment failures return `chrome_connection_failed`, sanitized guidance and measured `attachment_elapsed_ms`. Pending approval is a possible cause, not a confirmed diagnosis. This error does not automatically qualify for MCP fallback. A lost established connection returns `chrome_connection_lost`; sessions never reconnect automatically.
 
 ## First use
 
@@ -53,7 +55,24 @@ The floating mini-modal supports account-bound read-only `status`: `readiness: a
 
 The browser permission grants access to the Chrome session. The adapter limits its operations to the matching Jira site and expected account, but that is not a browser-enforced restriction to one tab.
 
-Write a question to a private local UTF-8 file, then:
+## Persistent agent session
+
+Keep one foreground process alive for the whole interaction:
+
+```sh
+rovo-relay --site https://example.atlassian.net \
+  --session pilot --account user@example.com session
+```
+
+The process attaches lazily after checking the site's delivery guard, runs one startup status and flushes its schema-1 JSON result with `exit_code`. Wait for that result before writing commands. A nonzero startup code ends the process. The initial approval is still required; keeping the process alive avoids a new attachment for every command.
+
+Send one JSON argv array per line on stdin. For example, `["status"]` performs another read-only check. After send readiness, available credits and user authorization are established, `["ask", "--prompt-file", "/path/to/question.txt"]` uses the same connection. Existing `chat list`, `chat export` and ask options use their usual argv form. Keep the process's stdin open between commands; closing it ends the session. Do not start a separate status/ask process for each step.
+
+Each input line receives one flushed JSON result with `exit_code`; stdout contains no banner or echo. Site, account, request-session and dry-run policy are fixed at startup. Only status, ask and chat commands are accepted. Malformed input, help, global overrides, nested sessions, MCP commands and `--prompt-file -` (including `=-`) are refused. Preparation/argument errors leave the connection open. Authentication failure, blocked delivery, interruption, lost connection or an unsuccessful possibly-submitted operation ends the process. A completed ask may continue even with `retry_safe: false`; that value forbids resending the completed turn.
+
+Every operation rechecks delivery state, eligible tabs, unique panel, account and applicable composer guards. Locks are released between commands; no DOM or readiness result is cached. EOF, Ctrl-C, SIGTERM and errors detach the client without closing external Chrome tabs. Cleanup errors go to stderr without replacing the command result. Global `--dry-run session` validates startup arguments, emits one result and exits without attaching or reading commands. One-shot commands remain available and attach/detach independently.
+
+For a one-shot operation, write a question to a private local UTF-8 file, then:
 
 ```sh
 rovo-relay --json \
@@ -78,7 +97,7 @@ Copy an ID from `chat list`; do not guess it. Listing and export cover currently
 
 One-shot commands produce schema-versioned JSON. `--help` produces text. `ask --timeout` defaults to a 180-second response budget, configurable from 1 to 600 seconds; preparation and browser operations have their own waits. Answers are capped at 12,000 characters and exports at 24,000, with truncation indicators. `context_percent` remains null because no verified meter is exposed.
 
-Global `--dry-run` validates inputs without contacting the browser or writing request state. With no command in an interactive terminal, the CLI opens the standard CLI-Anything REPL. Include site/session/account for each browser command; REPL history is not saved.
+Global `--dry-run` validates inputs without contacting the browser or writing request state. With no command in an interactive terminal, the CLI opens the standard CLI-Anything REPL, which also retains one lazy connection until exit. Include site/session/account for each browser command; REPL history is not saved. Connection failure ends the REPL without a silent reconnect.
 
 | Exit | Meaning |
 |---|---|

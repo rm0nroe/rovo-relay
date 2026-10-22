@@ -48,6 +48,16 @@ class TestCLISubprocess:
         assert output.returncode == 1
         assert json.loads(output.stdout)["retry_safe"] is True
 
+    def test_session_help_and_dry_run(self):
+        output = self.run("session", "--help")
+        assert output.returncode == 0 and "JSON" in output.stdout
+        output = self.run("--site", "https://x.atlassian.net", "--session", "probe",
+                          "--account", "a@example.com", "--dry-run", "session")
+        assert output.returncode == 0, output.stderr
+        result = json.loads(output.stdout)
+        assert result["dry_run"] is True and result["exit_code"] == 0
+        assert "session" in json.loads(self.run("doctor").stdout)["implemented"]
+
     def test_image_dry_run_and_rejection(self, tmp_path):
         prompt = tmp_path / "prompt.txt"
         prompt.write_text("Describe the image")
