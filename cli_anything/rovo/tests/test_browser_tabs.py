@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from itertools import count
 
 import pytest
-from playwright.sync_api import Browser, Locator, Page
+from playwright.sync_api import Browser, Locator, Page, TimeoutError
 
 from cli_anything.rovo.core.state import read_request, state_dir
 from cli_anything.rovo.utils import rovo_backend
@@ -477,6 +477,41 @@ def test_wrong_account_never_opens_rovo(run_browser):
     target.launcher.click.assert_not_called()
     target.page.reload.assert_not_called()
     target.page.close.assert_not_called()
+
+
+@pytest.mark.parametrize("panel_open,correct_account", [(False, True), (True, True), (False, False)])
+def test_overflow_keeps_launcher_mounted_until_panel_opens(run_browser, panel_open, correct_account):
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=panel_open, authenticated=False)
+    more = target.page.get_by_role("button", name="Show more", exact=True)
+    menu = {"open": False, "closing": False}
+    more.is_visible.return_value = True
+    more.click.side_effect = lambda **kw: menu.update(open=True, closing=False)
+    target.identity.is_visible.side_effect = lambda: correct_account and menu["open"]
+    target.launcher.is_visible.side_effect = lambda: menu["open"] or menu["closing"]
+
+    def escape(key):
+        assert key == "Escape"
+        menu.update(open=False, closing=True)
+
+    def launch(**kw):
+        # The closing popover stays briefly visible, then unmounts its launcher.
+        if not menu["open"]:
+            raise TimeoutError("Locator.click: Timeout 10000ms exceeded.\n  - element was detached from the DOM, retrying")
+        target.panel.is_visible.return_value = True
+        menu.update(open=False, closing=False)
+
+    target.page.keyboard.press.side_effect = escape
+    target.launcher.click.side_effect = launch
+    result, code = run_browser(target)
+    assert code == (0 if correct_account else 2), result
+    if correct_account:
+        assert result["readiness_phase"] == "ready"
+    assert target.launcher.click.call_count == int(correct_account and not panel_open)
+    more.click.assert_called_once()
+    target.page.keyboard.press.assert_called_once_with("Escape")
+    target.textbox.fill.assert_not_called()
+    target.submit.click.assert_not_called()
+    target.page.reload.assert_not_called()
 
 
 def test_navigation_while_waiting_stops_preparation(run_browser):
