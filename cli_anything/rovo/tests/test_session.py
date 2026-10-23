@@ -527,3 +527,17 @@ def test_tab_closed_while_stdin_waits_drains_cached_events_before_selection(brow
         env.target.submit.click.assert_not_called()
         replacement.submit.click.assert_not_called()
     env.connect.assert_called_once()
+
+
+def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkeypatch, capsys, tmp_path):
+    prompt = tmp_path / "question.txt"
+    prompt.write_text(PROMPT)
+    browser_env.target.status.inner_text.side_effect = ["Rovo is thinking", "Response complete."] * 2
+    code, results = stream(monkeypatch, capsys, [["ask", "--prompt-file", str(prompt)]] * 2)
+    assert code == 0 and [r["exit_code"] for r in results] == [0, 0, 0], results
+    first, second = results[1:]
+    assert first["chat_id"] == second["chat_id"]
+    assert second["conversation_mode"] == "continued" and second["turn_count"] == 2
+    browser_env.connect.assert_called_once()
+    browser_env.target.new_chat.click.assert_called_once()
+    assert browser_env.target.submit.click.call_count == 2

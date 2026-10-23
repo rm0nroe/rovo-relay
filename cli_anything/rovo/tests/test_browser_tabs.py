@@ -60,21 +60,32 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     status.inner_text.side_effect = ["Rovo is thinking", "Response complete."]
 
     def send():
-        responses.count.return_value = 1
-        groups.count.return_value = 1
+        responses.count.return_value += 1
+        groups.count.return_value += 1
         if after_submit_url:
             page.url = after_submit_url
 
     submit.click.side_effect = send
+    groups.last.get_by_test_id.return_value.locator.return_value = content
+    new_chat.click.side_effect = lambda: (setattr(responses.count, "return_value", 0), setattr(groups.count, "return_value", 0))
+    search, menu, all_chats, back, rows, row, history = [MagicMock(spec=Locator) for _ in range(7)]
+    search.is_visible.return_value = False
+    search.input_value.return_value = ""
+    rows.evaluate_all.side_effect = lambda script: ["12345678-1234-4234-8234-123456789abc"] if submit.click.call_count else []
+    panel.locator.return_value = rows
     panel.get_by_test_id.side_effect = {
         "assistant-response-card-layout": responses,
         "rovo-chat-message-group": groups,
         "chat-history-status-live-region": status,
+        "chat-history-container": history,
+        "chat-conversation-list-refresh-row-12345678-1234-4234-8234-123456789abc": row,
     }.__getitem__
     panel.get_by_role.side_effect = lambda role, name=None, **kw: (
         textbox if role == "textbox" else welcome if role == "heading" and name.search("How can I help, Fixture?")
         else attachments if not isinstance(name, str)
-        else {"Stop generating": stop, "Submit": submit, "New chat": new_chat}[name]
+        else {"Stop generating": stop, "Submit": submit, "New chat": new_chat,
+              "Search conversations...": search, "Menu": menu, "View all conversations": all_chats,
+              "Go back to Rovo chat": back}[name]
     )
     roots = {}
     for test_id in (PANEL, MINI_PANEL):
@@ -93,7 +104,8 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     return SimpleNamespace(page=page, panel=panel, roots=roots, submit=submit,
                            textbox=textbox, stop=stop, attachments=attachments,
                            responses=responses, groups=groups, welcome=welcome,
-                           status=status, new_chat=new_chat, launcher=launcher, identity=identity)
+                           status=status, new_chat=new_chat, launcher=launcher, identity=identity,
+                           rows=rows, row=row, content=content, user=user)
 
 
 @pytest.fixture
@@ -109,7 +121,10 @@ def run_browser(monkeypatch, tmp_path):
         runtime.__enter__.return_value.chromium.connect_over_cdp.return_value = browser
         monkeypatch.setattr(rovo_backend, "sync_playwright", lambda: runtime)
         result = rovo_backend.operate(ORIGIN, "probe", ACCOUNT, **kwargs)
-        browser.close.assert_called_once()
+        if runtime.__enter__.called:
+            browser.close.assert_called_once()
+        else:
+            browser.close.assert_not_called()
         assert not list(tmp_path.rglob("control.lock"))
         return result
 

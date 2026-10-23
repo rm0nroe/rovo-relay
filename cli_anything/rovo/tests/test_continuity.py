@@ -1,0 +1,159 @@
+"""Automatic continuation must bind verified history, never picker order or titles."""
+import json
+
+import pytest
+
+from cli_anything.rovo import rovo_cli
+from cli_anything.rovo.core.state import read_request, save_request, site_lock, state_dir
+from cli_anything.rovo.utils import rovo_backend
+from test_browser_tabs import ACCOUNT, ORIGIN, PROMPT, page_fixture, run_browser
+
+CHAT = "12345678-1234-4234-8234-123456789abc"
+OTHER = "22345678-1234-4234-8234-123456789abc"
+
+
+def completed(run_browser):
+    result, code = run_browser(prompt=PROMPT)
+    assert code == 0 and result["continuity_status"] == "verified", result
+    assert result["chat_id"] == CHAT
+    return result
+
+
+def existing():
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.responses.count.return_value = 1
+    target.groups.count.return_value = 1
+    return target
+
+
+def test_new_chat_binding_survives_restart_and_followup(run_browser, tmp_path):
+    completed(run_browser)
+    target = existing()
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["conversation_mode"] == "continued", result
+    assert result["chat_id"] == CHAT and result["turn_count"] == 2
+    target.new_chat.click.assert_not_called()
+    target.row.click.assert_called_once()
+    target.submit.click.assert_called_once()
+    stored = read_request(state_dir(tmp_path, ORIGIN, "probe"))
+    assert stored["turn_sha256"] == result["turn_sha256"]
+    assert PROMPT not in json.dumps(stored) and "Synthetic answer" not in json.dumps(stored)
+
+
+@pytest.mark.parametrize("change", ["user", "answer", "count"])
+def test_changed_saved_history_stops_before_fill(run_browser, change):
+    completed(run_browser)
+    target = existing()
+    if change == "user":
+        target.user.inner_text.return_value = "Another task"
+    elif change == "answer":
+        target.content.all_inner_texts.return_value = ["Different response"]
+    else:
+        target.groups.count.return_value = 2
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and "changed" in result["message"], result
+    target.textbox.fill.assert_not_called()
+    target.submit.click.assert_not_called()
+
+
+@pytest.mark.parametrize("change", [{"account": "other@example.com"}, {"site": "https://other.atlassian.net"},
+                                    {"chat_id": None}, {"continuity_status": "unavailable"},
+                                    {"chat_id": "bad-id"}])
+def test_invalid_binding_never_attaches(run_browser, tmp_path, change):
+    completed(run_browser)
+    directory = state_dir(tmp_path, ORIGIN, "probe")
+    with site_lock(directory):
+        save_request(directory, read_request(directory) | change)
+    target = existing()
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and result["submission_state"] == "not_attempted", result
+    target.page.goto.assert_not_called()
+    target.submit.click.assert_not_called()
+
+
+@pytest.mark.parametrize("ids", [[], [CHAT, OTHER], ["malformed"]])
+def test_capture_failure_preserves_answer_and_blocks_implicit_followup(run_browser, tmp_path, ids):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.rows.evaluate_all.side_effect = [[], ids]
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["answer"] == "Synthetic answer", result
+    assert result["continuity_status"] == "unavailable" and result["retry_safe"] is False
+    assert read_request(state_dir(tmp_path, ORIGIN, "probe"))["execution_status"] == "completed"
+    assert run_browser(prompt=PROMPT)[1] == 1
+    target.submit.click.assert_called_once()
+
+
+def test_new_id_must_reopen_matching_turn(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.row.click.side_effect = lambda: setattr(target.user.inner_text, "return_value", "Unrelated conversation")
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["continuity_status"] == "unavailable", result
+    assert result["chat_id"] is None
+
+
+def test_new_replaces_binding_and_explicit_chat_adopts_binding(run_browser):
+    completed(run_browser)
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    result, code = run_browser(target, prompt=PROMPT, new=True)
+    assert code == 0 and result["conversation_mode"] == "new", result
+    target.new_chat.click.assert_called_once()
+    target = existing()
+    target.user.inner_text.return_value = "Different prior question"
+    target.submit.click.side_effect = lambda: (setattr(target.user.inner_text, "return_value", PROMPT),
+                                               setattr(target.responses.count, "return_value", 2),
+                                               setattr(target.groups.count, "return_value", 2))
+    result, code = run_browser(target, prompt=PROMPT, chat_id=CHAT)
+    assert code == 0 and result["continuity_status"] == "verified", result
+    target.new_chat.click.assert_not_called()
+
+
+def test_new_does_not_bypass_uncertain_delivery(run_browser, tmp_path):
+    completed(run_browser)
+    directory = state_dir(tmp_path, ORIGIN, "probe")
+    with site_lock(directory):
+        save_request(directory, read_request(directory) | {"execution_status": "timeout"})
+    target = existing()
+    result, code = run_browser(target, prompt=PROMPT, new=True)
+    assert code == 4, result
+    target.page.goto.assert_not_called()
+    target.submit.click.assert_not_called()
+
+
+def test_new_and_chat_are_mutually_exclusive(tmp_path):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text(PROMPT)
+    result, code = rovo_cli.invoke(["--site", ORIGIN, "--session", "probe", "--account", ACCOUNT,
+                                  "--dry-run", "ask", "--new", "--chat", CHAT, "--prompt-file", str(prompt)])
+    assert code == 1 and "either" in result["message"]
+
+
+def test_missing_saved_row_preserves_binding_without_sending(run_browser, tmp_path):
+    completed(run_browser)
+    before = read_request(state_dir(tmp_path, ORIGIN, "probe"))
+    target = existing()
+    target.row.wait_for.side_effect = ValueError("Saved conversation unavailable")
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and result["submission_state"] == "not_attempted", result
+    target.submit.click.assert_not_called()
+    assert read_request(state_dir(tmp_path, ORIGIN, "probe")) == before
+
+
+def test_new_binding_is_isolated_by_session(run_browser, tmp_path, monkeypatch):
+    completed(run_browser)
+    directory = state_dir(tmp_path, ORIGIN, "probe")
+    directory.rename(directory.with_name("other-session"))
+    result, code = run_browser(prompt=PROMPT)
+    assert code == 0 and result["conversation_mode"] == "new", result
+
+
+def test_changed_conversation_while_filling_never_submits(run_browser):
+    completed(run_browser)
+    target = existing()
+    fill = target.textbox.fill.side_effect
+    def change(text):
+        fill(text)
+        target.user.inner_text.return_value = "Different chat selected during fill"
+    target.textbox.fill.side_effect = change
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and "changed before submission" in result["message"], result
+    target.submit.click.assert_not_called()

@@ -85,6 +85,8 @@ rovo-relay-cli --json \
   ask --prompt-file question.txt
 ```
 
+`ask` creates the session's first chat, then automatically continues its verified conversation using the same site/session/account, including after process restart or a closed owned tab. No ID management is needed for ordinary follow-ups. Use `ask --new --prompt-file question.txt` for a different task. Explicit `--chat UUID` selects an observed conversation and binds it after completion; `--new` and `--chat` cannot be combined.
+
 Add `--image diagram.png`, `--github-source on` or `--chat CONVERSATION_UUID` to `ask`. PNG attachments are limited to four files of 5 MiB each by local policy. Only one image per request has live acceptance. GitHub selection changes the chat filter, not connector installation, repository permissions or indexing.
 
 With the same global site/session/account flags, use:
@@ -95,7 +97,7 @@ chat export --chat CONVERSATION_UUID
 ask --chat CONVERSATION_UUID --prompt-file follow-up.txt
 ```
 
-Copy an ID from `chat list`; do not guess it. Listing and export cover currently loaded history only. Export contains user/assistant text, not original image bytes, intermediate progress or hidden model context. New-chat ID capture and structured citation extraction are not implemented.
+Copy an ID from `chat list`; do not guess it. Listing and export cover currently loaded history only. Export contains user/assistant text, not original image bytes, intermediate progress or hidden model context. New-chat IDs are captured from the loaded picker before/after submission and accepted only after reopening and matching the completed turn. Results report `conversation_mode`, `chat_id` and `continuity_status`. A verified binding stores the last turn's hash and loaded turn count in the existing private request record, not prompt/answer text. A missing, ambiguous, legacy or wrong-account binding, or changed loaded history, blocks implicit follow-up. Inspect before explicitly selecting a chat; use `--new` only for a genuinely separate task. Capture failure preserves the completed answer with a warning and `continuity_status: unavailable`; never resend it. `--new` cannot bypass unresolved delivery. Automatic continuity applies only to direct CLI mode; structured citation extraction remains unimplemented.
 
 ## Output and recovery
 

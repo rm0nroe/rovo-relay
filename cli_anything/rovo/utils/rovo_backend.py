@@ -4,7 +4,9 @@ import re
 import sys
 from contextlib import nullcontext
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
+from hashlib import sha256
+import json
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
@@ -194,8 +196,47 @@ def prepare_panel(page, origin, account, diagnostics):
             page.keyboard.press("Escape")
 
 
+def conversation_rows(panel):
+    search = panel.get_by_role("searchbox", name="Search conversations...", exact=True)
+    if not search.is_visible():
+        all_chats = panel.get_by_role("button", name="View all conversations", exact=True)
+        if not all_chats.is_visible():
+            panel.get_by_role("button", name="Menu", exact=True).click()
+        all_chats.click()
+    search.wait_for(state="visible")
+    if search.input_value():
+        raise ValueError("Conversation list has a search filter; clear it before continuing.")
+    rows = panel.locator('button[data-testid^="chat-conversation-list-refresh-row-"]')
+    # shortcut: loaded history only; an absent or ambiguous new ID disables continuity.
+    return rows
+
+
+def open_conversation(panel, chat_id):
+    conversation_rows(panel)
+    row = panel.get_by_test_id("chat-conversation-list-refresh-row-" + str(UUID(chat_id)))
+    row.wait_for(state="visible")
+    row.click()
+    panel.get_by_role("searchbox", name="Search conversations...", exact=True).wait_for(state="hidden")
+    panel.get_by_role("textbox").wait_for(state="visible")
+    panel.get_by_test_id("chat-history-container").locator(".ak-renderer-document").first.wait_for(state="visible")
+    require_idle(panel)
+
+
+def turn_signature(panel):
+    groups = panel.get_by_test_id("rovo-chat-message-group")
+    last = groups.last
+    user = last.locator(".ak-renderer-document").first.inner_text().strip()
+    answer = "\n".join(last.get_by_test_id("assistant-response-card-layout").locator(".ak-renderer-document").all_inner_texts()).strip()
+    return {"turn_count": groups.count(), "turn_sha256": sha256(json.dumps([user, answer]).encode()).hexdigest()}
+
+
+def observed_ids(rows):
+    ids = rows.evaluate_all("els => els.map(el => el.dataset.testid.replace('chat-conversation-list-refresh-row-', ''))")
+    return {str(UUID(value)) for value in ids}
+
+
 def operate(origin, session, account, prompt=None, timeout=180, images=(), github_source=None,
-            chat_id=None, action="status", connection=None, chrome_port=None):
+            chat_id=None, action="status", connection=None, chrome_port=None, new=False):
     allowed_prefixes = (origin + "/jira/", origin + "/browse/")
     directory = state_dir(Path.home(), origin, session)
     record = {"request_id": str(uuid4()), "site": origin, "account": account, "chat_id": chat_id,
@@ -211,6 +252,16 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
             if blocked:
                 return base | blocked | {"execution_status": "blocked", "retry_safe": False,
                                       "message": "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions."}, 4
+            automatic = prompt is not None and not new and chat_id is None and prior is not None
+            if new and chat_id:
+                raise ValueError("Use either --new or --chat, not both.")
+            if automatic:
+                if (prior.get("site") != origin or prior.get("account") != account
+                        or prior.get("continuity_status") != "verified" or not prior.get("chat_id")):
+                    raise ValueError("No verified conversation binding for this session/account. Use --new or an observed --chat UUID.")
+                chat_id = str(UUID(prior["chat_id"]))
+                record["chat_id"] = chat_id
+            base["conversation_mode"] = "continued" if chat_id else "new"
             with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port)) as owner:
                 page = owner.target(origin, session, account)
                 owner.cleanable.discard(page)
@@ -240,29 +291,15 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 require_idle(panel)
                 responses = panel.get_by_test_id("assistant-response-card-layout")
                 if chat_id or action == "chat_list":
-                    search = panel.get_by_role("searchbox", name="Search conversations...", exact=True)
-                    if not search.is_visible():
-                        all_chats = panel.get_by_role("button", name="View all conversations", exact=True)
-                        if not all_chats.is_visible():
-                            panel.get_by_role("button", name="Menu", exact=True).click()
-                        all_chats.click()
-                    search.wait_for(state="visible")
-                    if search.input_value():
-                        raise ValueError("Conversation list has a search filter; clear it before continuing.")
-                    rows = panel.locator('button[data-testid^="chat-conversation-list-refresh-row-"]')
-                    rows.first.wait_for(state="visible")
+                    rows = conversation_rows(panel)
                     if action == "chat_list":
+                        rows.first.wait_for(state="visible")
                         chats = rows.evaluate_all("""els => els.slice(0,100).map(el => ({id:el.dataset.testid.replace('chat-conversation-list-refresh-row-',''),title:el.getAttribute('aria-label')}))""")
                         return base | {"execution_status": "completed", "chats": chats,
                                        "coverage": "loaded_only", "truncated": rows.count() > 100}, 0
-                    row = panel.get_by_test_id("chat-conversation-list-refresh-row-" + chat_id)
-                    row.wait_for(state="visible")
-                    row.click()
-                    search.wait_for(state="hidden")
-                    textbox.wait_for(state="visible")
-                    panel.get_by_test_id("chat-history-container").locator(".ak-renderer-document").first.wait_for(state="visible")
-                    if stop.is_visible():
-                        raise ValueError("Selected chat is still generating; no prompt sent.")
+                    open_conversation(panel, chat_id)
+                    if automatic and turn_signature(panel) != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
+                        raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
                     if action == "chat_export":
                         turns = panel.get_by_test_id("rovo-chat-message-group").evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
                         messages, remaining = [], 24000
@@ -288,7 +325,14 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                 or responses.count() != 0 or panel.get_by_test_id("rovo-chat-message-group").count() != 0
                                 or not submit.is_visible() or submit.is_enabled()):
                             raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
+                if prompt is not None and not chat_id:
+                    old_ids = observed_ids(conversation_rows(panel))
+                    panel.get_by_role("button", name="Go back to Rovo chat", exact=True).click()
+                    textbox.wait_for(state="visible")
+                    if responses.count() or panel.get_by_test_id("rovo-chat-message-group").count():
+                        raise ValueError("Expected empty new chat after conversation discovery; no prompt sent.")
                 before = responses.count()
+                selected_turn = turn_signature(panel) if chat_id else None
                 require_idle(panel)
                 if github_source is not None:
                     picker = panel.locator('button[data-spotlight-target="rovo-chat-web-search-spotlight-target"]')
@@ -315,6 +359,8 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Prompt or attachment is not ready; no prompt sent. Inspect the retained draft.")
                 if textbox.inner_text().strip() != prompt.strip() or not page.url.startswith(allowed_prefixes):
                     raise ValueError("Target or draft changed before submission.")
+                if (chat_id and turn_signature(panel) != selected_turn) or (not chat_id and responses.count() != before):
+                    raise ValueError("Conversation changed before submission; inspect the retained draft.")
                 record.update(submission_state="attempted_unknown", execution_status="waiting")
                 save_request(directory, record)
                 panel.get_by_role("button", name="Submit", exact=True).click()
@@ -337,11 +383,33 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                       generating=generating, answer=answer, before=before,
                                       prompt_matches=user_text.strip() == prompt.strip()):
                         record.update(execution_status="completed", submission_state="observed_submitted")
+                        record["continuity_status"] = "unavailable"
                         save_request(directory, record)
+                        warnings = ["Citation extraction is not implemented.",
+                                    "Completed means Rovo responded, not that retrieval or facts were verified."]
+                        try:
+                            signature = {"turn_count": groups.count(),
+                                         "turn_sha256": sha256(json.dumps([prompt.strip(), answer.strip()]).encode()).hexdigest()}
+                            if turn_signature(panel) != signature:
+                                raise ValueError("Completed conversation changed before capture")
+                            if not chat_id:
+                                require_idle(panel)
+                                new_ids = observed_ids(conversation_rows(panel)) - old_ids
+                                if len(new_ids) != 1:
+                                    raise ValueError("New conversation ID is missing or ambiguous")
+                                captured_id = new_ids.pop()
+                                open_conversation(panel, captured_id)
+                                if turn_signature(panel) != signature:
+                                    raise ValueError("Reopened conversation does not match the completed turn")
+                                record["chat_id"] = captured_id
+                            verified = record | signature | {"continuity_status": "verified"}
+                            save_request(directory, verified)
+                            record = verified
+                        except Exception:
+                            warnings.append("Answer completed, but conversation continuity could not be verified. Do not resend; inspect the chat before --chat or use --new for another task.")
                         return base | record | bounded_answer(answer) | {
                             "retry_safe": False, "image_count": len(images), "elapsed_ms": round((time.monotonic()-started_at)*1000),
-                            "warnings": ["New-chat ID and citation extraction are not implemented in this slice.",
-                                         "Completed means Rovo responded, not that retrieval or facts were verified."]}, 0
+                            "warnings": warnings}, 0
                     page.wait_for_timeout(200)
                 record["execution_status"] = "timeout"
                 save_request(directory, record)
