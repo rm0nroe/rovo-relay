@@ -1,6 +1,6 @@
 # Copilot setup prompt
 
-This is the single setup prompt for installation or updating an existing checkout. Copy the text below into Copilot Agent mode on the target machine.
+This is the canonical Copilot-host setup and qualification document. For browser-bridge installation or updates, use the first prompt. To assess browserless Rovo delegation before changing the bridge, use the A2A qualification section below instead. Do not run both paths as automatic fallbacks.
 
 ```text
 Install Rovo Relay CLI from https://github.com/rm0nroe/rovo-relay and configure it for this project.
@@ -39,3 +39,38 @@ Redact account emails, private site/repo names, personal paths, tokens, and prop
 ```
 
 Other-machine browser access and code retrieval remain unverified until this test passes.
+
+## A2A qualification before changing the transport
+
+Documentation checked October 22, 2026. This procedure is a Copilot-host acceptance test, not a claim that the installed Copilot runtime supports A2A.
+
+The Atlassian-side switch is a built-in administration feature. Enabling it does not install an app, connect a client, or establish that the intended organization permits that client. Prefer capabilities already included in the approved environment. If the Copilot side requires a new extension, Marketplace app, Copilot Studio/Foundry resource, SDK application, custom adapter, subscription or extra approval, report that requirement and stop before adding it. Do not assume built-in means unrestricted or free usage.
+
+- [Atlassian A2A setup](https://support.atlassian.com/atlassian-ai-gateway/docs/set-up-agent2agent-connections/) requires a compatible client and user OAuth authorization. The public Agent Card is https://a2a.atlassian.com/.well-known/agent.json; it is not an MCP endpoint.
+- [Atlassian administration](https://support.atlassian.com/security-and-access-policies/docs/manage-a2a-connections-in-admin-hub/) documents the separate, organization-wide **Rovo > Agent2Agent > Allow A2A** control, disabled by default. Rovo app access and user permissions also apply.
+- [VS Code's Copilot integration documentation](https://code.visualstudio.com/docs/agent-customization/mcp-servers) documents MCP connections. [Foundry Toolkit's A2A integration](https://code.visualstudio.com/docs/intelligentapps/agentbuilder) and [Copilot Studio's connected agents](https://learn.microsoft.com/en-us/microsoft-copilot-studio/agents-experience/add-agent-to-agent) run in different products. Their A2A support does not prove support in the installed editor or CLI session.
+- [Copilot SDK with Microsoft Agent Framework](https://docs.github.com/en/copilot/how-tos/copilot-sdk/integrations/microsoft-agent-framework) is another documented integration path, requiring an application/runtime. It is not evidence that a native editor setting can connect directly to Rovo.
+
+Copy this prompt into the actual Copilot session:
+
+~~~text
+Qualify browserless Atlassian Rovo A2A in THIS Copilot runtime. This is a bounded read-only acceptance test, not an instruction to install a replacement stack. Use only built-in or already-approved capabilities. New add-ons, extensions, Marketplace apps, Copilot Studio/Foundry resources, SDK applications, adapters, subscriptions and policy changes are outside scope. If any are required, report EXTRA_COMPONENT_REQUIRED, name the component and its approval/licensing requirements with official documentation, and stop before installing or provisioning it. Do not infer that enabling A2A in a personal test organization enables it in the intended organization.
+
+1. Identify the actual product, harness, version, OS, shell and execution environment (local, WSL, container or remote). Inspect only relevant loaded configuration and available tools, with secrets redacted. Distinguish GitHub Copilot in VS Code/CLI from Copilot Studio, Foundry Toolkit and an SDK application. Do not infer capability from an extension being installed or VS Code being open. Check the official documentation for this exact runtime. Identify the existing supported A2A entry point/tool and OAuth client, or report CLIENT_CAPABILITY_NOT_ESTABLISHED. An MCP entry is not an A2A client. Do not put an Agent Card URL in MCP configuration, invent configuration keys, install packages or create an adapter.
+
+2. Establish the intended Atlassian site, organization and account from this project's existing approved setup. If ambiguous, ask me for the site and expected account. Never substitute a personal test site for the intended site. Using my existing normal Chrome, inspect Atlassian Administration > Rovo > Agent2Agent > Allow A2A and Rovo access. Preserve tabs and drafts. Record the displayed setting; missing admin access means UNKNOWN, not disabled. Leave settings unchanged. A2A off means ORG_A2A_DISABLED. Existing Jira sign-in or MCP OAuth does not establish A2A authorization.
+
+3. Read https://a2a.atlassian.com/.well-known/agent.json from the actual Copilot execution environment using an available HTTP client, with a bounded timeout and no credentials. Record HTTP status or exact network error, elapsed time, name, endpoint, protocol, transport and required authentication from the returned JSON. Do not disable certificate verification, copy browser credentials or retry through another environment and call that Copilot-host proof. Public discovery alone does not prove authorization. Confirm a supported, already-authorized A2A connection for the intended account/site. If new OAuth consent or organization access changes are required, stop with the specific setup gap and requested scopes. Complete the independent read-only checks even if another gate fails.
+
+4. Only if client support, organization access and existing OAuth authorization are verified, send exactly ONE synthetic request through the identified A2A connection: "Read-only transport test. Reply with exactly ROVO_A2A_OK. Do not access or change Jira, Confluence, repositories or other resources." Do not use Rovo's browser chat, MCP retrieval, web search or your own model's answer as a substitute. Record the actual call, provider response and completion/error state. Retain exposed context/task/message identifiers privately; do not invent them. If delivery might have occurred but no result returns, mark UNKNOWN_DELIVERY and do not resubmit or switch transports. Respect server retry instructions without repeating a possibly accepted message.
+
+5. End this turn after that result and retain the connection configuration and any required runtime handles for a later turn. Report separately: client capability, public discovery, organization access, OAuth readiness, actual Rovo response and browser interaction. No Jira preparation or browser focus change should be needed for the synthetic request. Record exact errors, elapsed time, caller deadline and which layer failed; do not blame the browser or increase timeouts without evidence. Save sanitized evidence outside Git; never include tokens, cookies, OAuth codes, proprietary content or personal paths in the shared report. If any prerequisite failed, stop without a live request. Do not change bridge code, request records, policies, billing or installations.
+~~~
+
+After the first synthetic request passes, send this as a separate Copilot turn:
+
+~~~text
+Continue the A2A reuse test. Inspect the previous result first; if it was incomplete, failed or delivery was uncertain, stop without sending. Using the SAME approved A2A integration and credential context, send exactly one new synthetic request: "Read-only transport test. Reply with exactly ROVO_A2A_REUSE_OK. Do not access or change Jira, Confluence, repositories or other resources." Do not prepare or focus Jira, use browser automation, start a new OAuth grant or fall back to MCP. Preserve any required client process and record its identity if applicable; A2A itself does not require one persistent local PID or TCP connection. Record the actual call/result, whether approval or sign-in was requested, browser focus changes, elapsed time and exposed identifiers. A new message ID is expected. Do not claim conversation continuity from this independent request. Never retry uncertain delivery. Close only test-owned handles/tabs when finished, retaining the approved integration and evidence. Report PASS only for two provider-backed completed responses across separate Copilot turns with no manual Jira setup; report unsupported or unknown evidence explicitly.
+~~~
+
+This proves transport and routine authorization reuse only. It does not prove conversation continuity, recovery after sleep or expired authentication, exact-commit file retrieval, or token savings. Keep the established indexing gate and exact-file comparison for retrieval acceptance; A2A availability does not fix a missing GitHub tool registration or missing repository index. A broader reliability test follows only after this small acceptance test passes.
