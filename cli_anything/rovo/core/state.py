@@ -56,7 +56,8 @@ def next_action(payload, code):
         return "new_or_inspect"
     if error or status == "authentication_required":
         return "stop"
-    return "fix_or_report" if code == 1 and safe else "stop"
+    # Browser-side failures (layout, timeouts) are not the agent's input to fix.
+    return "fix_or_report" if code == 1 and safe and "browser_mode" not in payload else "stop"
 
 
 def blocking_request(directory):
