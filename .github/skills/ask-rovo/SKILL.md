@@ -17,7 +17,7 @@ Requires `rovo-relay-cli` 0.1.0a6+, schema 1, and the user's site, session and e
 | `ask` | Send the next authorized command; a completed turn is never sent again. |
 | `new_or_inspect` | Answer delivered; never resend. User picks `--new`, or an observed `--chat UUID` from `chat list`. |
 | `mcp_fallback` | Follow [MCP_FALLBACK.md](MCP_FALLBACK.md) using only already-configured Playwright MCP; never install tools or create a browser. |
-| `fix_or_report` | Nothing sent. Fix your own input and resend, or report. Never clear user drafts. |
+| `fix_or_report` | Nothing sent; your CLI input was rejected. Fix it and resend, or report. Never clear user drafts. |
 | `stop` | Report `message`, `error_code`, `submission_state`, `retry_safe`. Connection/setup/layout errors and `--chrome-port`: [TROUBLESHOOTING.md](TROUBLESHOOTING.md). |
 
 ## Commands

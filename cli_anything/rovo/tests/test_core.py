@@ -124,6 +124,8 @@ def test_missing_chrome_endpoint_gives_safe_setup_steps(monkeypatch, tmp_path, p
     ({"execution_status": "error", "error_code": "chrome_connection_failed", "submission_state": "not_attempted", "retry_safe": True}, 1, "stop"),
     ({"execution_status": "authentication_required", "submission_state": "not_attempted", "retry_safe": True}, 2, "stop"),
     ({"execution_status": "error", "submission_state": "not_attempted", "retry_safe": True}, 1, "fix_or_report"),
+    ({"execution_status": "error", "submission_state": "not_attempted", "retry_safe": True,
+      "browser_mode": "existing_chrome", "readiness_phase": "panel"}, 1, "stop"),
     ({"execution_status": "interrupted", "submission_state": "not_attempted", "retry_safe": True}, 3, "stop"),
 ])
 def test_next_action_maps_every_result_to_one_agent_decision(payload, code, expected):
