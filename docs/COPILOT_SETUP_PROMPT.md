@@ -42,7 +42,7 @@ Other-machine browser access and code retrieval remain unverified until this tes
 
 ## Update and synthetic continuity acceptance
 
-Use this on a machine where the bridge was already installed, to update it and prove automatic conversation continuity without repository retrieval. It needs commit `cace054` or a descendant (package 0.1.0a6 or newer) and uses two Rovo questions. Keep the Chrome window at least about 1,000 px wide: narrower Jira layouts move the header Ask Rovo button into an overflow menu, which the CLI does not open yet.
+Use this on a machine where the bridge was already installed, to update it and prove automatic conversation continuity without repository retrieval. It needs commit `cace054` or a descendant (package 0.1.0a6 or newer) and uses two Rovo questions. Pasting the first turn authorizes exactly those two, so paste it only when the account's allowance covers them. Keep the Chrome window at least about 1,000 px wide: narrower Jira layouts move the header Ask Rovo button into an overflow menu, which the CLI does not open yet.
 
 Paste this as the first Copilot turn:
 
@@ -53,7 +53,7 @@ Update Rovo Relay CLI and run the first half of a synthetic continuity acceptanc
 
 2. Use my existing signed-in normal Chrome with remote debugging already approved. Make sure its window is at least about 1,000 px wide. Reuse the intended site and expected account; ask me if either is unknown. Use a new dedicated session name for this test. Start ONE retained foreground process: `rovo-relay-cli --site SITE --session SESSION --account EMAIL session`, adding global `--chrome-port PORT` before `session` only if `DevToolsActivePort` is missing and the port is advertised by or verified as owned by that Chrome. Keep its stdin/stdout handles open across Copilot turns; if the runtime cannot, report that limitation and stop. Read the flushed startup JSON first: require `exit_code: 0`, `readiness: authenticated_ui`, `readiness_phase: ready`, `tab_selection: connection_owned`, and `agent next action` in `implemented`. Respect any unresolved-request guard; never clear records.
 
-3. Write this exact text to a private UTF-8 prompt file outside Git: "Read-only synthetic continuity test. Reply with exactly ORBIT-5826. Do not search, use tools, save memories, or change any resources." Send `["ask", "--new", "--prompt-file", "FIRST_PATH"]` as one JSON line to that process, once. Act on the result's `next` field as the installed skill describes. Require `execution_status: completed`, `continuity_status: verified`, a returned `chat_id` and `next: ask`. Record `timings_ms`. Never retry an uncertain or failed send.
+3. By pasting this prompt I authorize exactly two Rovo questions for this test (this one and the follow-up in my next turn) and confirm the allowance covers them; do not stop to reconfirm credits. Write this exact text to a private UTF-8 prompt file outside Git: "Read-only synthetic continuity test. Reply with exactly ORBIT-5826. Do not search, use tools, save memories, or change any resources." Send `["ask", "--new", "--prompt-file", "FIRST_PATH"]` as one JSON line to that process, once. Act on the result's `next` field as the installed skill describes. Require `execution_status: completed`, `continuity_status: verified`, a returned `chat_id` and `next: ask`. Record `timings_ms`. Never retry an uncertain or failed send.
 
 4. Keep the process and its handles open, then end this Copilot turn. Report the installed commit, doctor capabilities, startup JSON fields above and the first result's `execution_status`, `continuity_status`, `next`, `timings_ms` and response text. Keep the chat ID private.
 ~~~
@@ -61,7 +61,7 @@ Update Rovo Relay CLI and run the first half of a synthetic continuity acceptanc
 After the first turn passes, paste this as a separate Copilot turn:
 
 ~~~text
-Continue the synthetic continuity acceptance test in the SAME retained rovo-relay-cli process. Inspect the previous result first; if it did not complete with verified continuity, or delivery was uncertain, stop without sending.
+Continue the synthetic continuity acceptance test in the SAME retained rovo-relay-cli process. Inspect the previous result first; if it did not complete with verified continuity, or delivery was uncertain, stop without sending. This is the second of the two questions I authorized in the first turn.
 
 1. Write this exact text to a second private prompt file outside Git: "Using only the preceding assistant response in this conversation, return that response in lowercase. Do not search, use tools, save memories, or change any resources." Send `["ask", "--prompt-file", "FOLLOWUP_PATH"]` once, with no `--chat` and no `--new`. Require `execution_status: completed`, the same `chat_id` as the first turn, `conversation_mode: continued`, `continuity_status: verified`, exactly one added visible user/assistant turn and response `orbit-5826`. Record `timings_ms` and `next`. Never retry.
 
