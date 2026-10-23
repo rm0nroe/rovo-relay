@@ -182,6 +182,50 @@ def test_startup_connection_failure_is_terminal_and_sanitized(browser_env, monke
     browser_env.runtime.__exit__.assert_called_once()
 
 
+def test_attachment_notice_precedes_connection_and_is_not_repeated(browser_env, monkeypatch, capsys):
+    class Stderr(io.StringIO):
+        flushed = False
+
+        def flush(self):
+            self.flushed = True
+            super().flush()
+
+    stderr = Stderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+
+    def connect(*args, **kwargs):
+        assert stderr.flushed
+        assert "20-second attachment timeout" in stderr.getvalue()
+        assert "If Chrome asks" in stderr.getvalue()
+        return browser_env.browser
+
+    browser_env.connect.side_effect = connect
+    code, results = stream(monkeypatch, capsys, [["status"], ["status"]])
+    assert code == 0 and [r["exit_code"] for r in results] == [0, 0, 0]
+    assert stderr.getvalue().count("Connecting to Chrome") == 1
+    browser_env.connect.assert_called_once()
+    browser_env.target.submit.click.assert_not_called()
+
+
+@pytest.mark.parametrize("phase", ["runtime_startup", "browser_attachment"])
+def test_connection_failure_reports_the_actual_phase(browser_env, monkeypatch, capsys, phase):
+    operation = browser_env.runtime.__enter__ if phase == "runtime_startup" else browser_env.connect
+    operation.side_effect = Error("Synthetic failure at /private/profile/secret")
+    code, results = stream(monkeypatch, capsys, [["status"]])
+    assert code == 1 and len(results) == 1
+    result = results[0]
+    assert result["attachment_phase"] == phase
+    assert result["attachment_timeout_ms"] == 20000
+    assert result["error_code"] == "chrome_connection_failed"
+    assert result["submission_state"] == "not_attempted" and result["retry_safe"] is True
+    assert "/private" not in json.dumps(result)
+    if phase == "runtime_startup":
+        browser_env.connect.assert_not_called()
+    else:
+        browser_env.connect.assert_called_once()
+    browser_env.target.submit.click.assert_not_called()
+
+
 def test_disconnect_never_reconnects(browser_env, monkeypatch, capsys):
     browser_env.browser.is_connected.side_effect = [True, False, False, False]
     code, results = stream(monkeypatch, capsys, [["status"], ["status"]])
