@@ -45,7 +45,7 @@ def doctor():
             "python": platform.python_version(), "platform": platform.system(),
             "playwright": importlib.metadata.version("playwright"),
             "skill_path": str(Path(__file__).parent / "skills" / "SKILL.md"),
-            "authenticated": "not_checked", "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)"],
+            "authenticated": "not_checked", "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity"],
             "mcp_handoff": "agent_tools_with_local_guard",
             "browser_requirement": "Direct mode needs approved Chrome debugging; skill fallback needs an already-permitted Playwright MCP session"}, 0
 
@@ -71,22 +71,26 @@ def status(ctx):
 @click.option("--timeout", type=click.IntRange(1, 600), default=180, show_default=True)
 @click.option("--image", multiple=True, type=click.Path(exists=True, dir_okay=False), help="PNG to upload, repeatable; at most four, 5 MiB each (local policy).")
 @click.option("--github-source", type=click.Choice(["on", "off"]), help="Set the chat's GitHub source filter, not connector permissions.")
-@click.option("--chat", type=click.UUID, help="Continue an observed conversation UUID; omit for a new chat.")
+@click.option("--chat", type=click.UUID, help="Explicitly select an observed conversation UUID.")
+@click.option("--new", is_flag=True, help="Start a separate conversation and replace this session's binding.")
 @click.pass_context
-def ask(ctx, prompt_file, timeout, image, github_source, chat):
-    """Send a prompt and optional PNG images in a new chat. Never retries uncertain delivery."""
+def ask(ctx, prompt_file, timeout, image, github_source, chat, new):
+    """Continue this session's verified chat, or create its first chat. Never retries delivery."""
     args = target(ctx)
     prompt = prompt_file.read(120001).strip()
     if not prompt or len(prompt) > 120000:
         raise click.UsageError("Prompt must contain 1 to 120000 characters (local policy).")
+    if new and chat:
+        raise click.UsageError("Use either --new or --chat, not both.")
     images = load_images(image)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True,
                 "site": args[0], "submission_state": "not_attempted", "prompt_characters": len(prompt),
                 "image_count": len(images), "image_bytes": sum(len(item["buffer"]) for item in images),
+                "conversation_mode": "new" if new else "explicit" if chat else "automatic",
                 "github_source_requested": github_source, "chat_id": str(chat) if chat else None}, 0
     return operate(*args, prompt=prompt, timeout=timeout, images=images, github_source=github_source,
-                   chat_id=str(chat) if chat else None, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"))
+                   chat_id=str(chat) if chat else None, new=new, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"))
 
 
 @cli.group()
@@ -268,7 +272,7 @@ def repl(chrome_port=None):
                     break
                 if line == "help":
                     skin.help({"doctor": "Runtime and skill path", "status": "Check existing Rovo tab",
-                               "ask": "New-chat text prompt; use --prompt-file", "quit": "Exit"})
+                               "ask": "Continue session chat; --new starts another; use --prompt-file", "quit": "Exit"})
                 elif line:
                     args = shlex.split(line)
                     if args:
