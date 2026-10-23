@@ -1,5 +1,15 @@
 # Validation status
 
+## Tab and readiness candidate (local, 2026-10-22)
+
+The existing CLI now creates and binds its own tab in the approved normal Chrome context, opens Ask Rovo and waits for account/panel/composer readiness. It does not inspect or select user-owned Rovo tabs, reload pages, retry submissions or add a browser/dependency. A closed owned tab is replaced only after the existing site-wide unresolved-delivery check. Live testing exposed stale Playwright close events while stdin was idle; draining pending events before checking the bound tab fixed that case, with an offline regression.
+
+The candidate passed 185 offline tests from outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`. All 12 installed source/document files and three documentation mirrors matched the checkout. The pinned isolated build could not run offline because its setuptools version was not cached; the validation wheel used already-cached setuptools 84.0.0 and existing wheel 0.48.0, with no dependency download. Exact pinned-build reproduction remains unverified.
+
+In the user's normal signed-in Chrome, startup opened a fresh tab and prepared a legacy Rovo panel while two other Jira/Rovo panels were open. Repeated status reused that tab and one connection; a synthetic unsent draft in the separate test tab stayed unchanged. Closing the owned panel was followed by automatic reopening without reload. Closing the owned tab was followed by successful replacement and readiness on the same connection. The installed candidate returned exit 0 and `authenticated_ui`; EOF detached once and closed its verified empty tab. A final one-shot status also verified automatic preparation and safe tab cleanup after tightening the final origin check. The separate synthetic draft and disposable comparison tab were removed, leaving the original user conversation intact. Request records were unchanged. No Rovo question, upload or retry was made; private evidence remains outside Git.
+
+This proves the local tab/preparation flows only. It does not diagnose an earlier refresh report from a Copilot run as stale frontend state, prove readiness under Copilot, or expand mini-modal sending/list/export support. Failed or unverified preparation is preserved and reported without reload. Conversation-bearing or uncertain tabs remain open on exit. Use the canonical Copilot setup prompt's two-status test through Copilot; no new tool, permission or installation is implied by local acceptance.
+
 ## Local checks
 
 The development baseline passed 20 unit and installed-command tests. They cover destination and identity validation, site locks, durable uncertain delivery, stale response rejection, output bounds, image policy, installed skill discovery, dry-run behavior and command validation. The clean repository passed all 20 tests after a fresh installation on 2026-10-21, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the test process launched outside the checkout. The wheel built successfully and its package files matched the sanitized source. No browser request is made by this suite.

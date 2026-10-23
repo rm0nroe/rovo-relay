@@ -23,6 +23,8 @@ class BrowserConnection:
         self.attempted = False
         self.failed = False
         self.diagnostics = {}
+        self.targets = {}
+        self.cleanable = set()
 
     def __enter__(self):
         return self
@@ -73,7 +75,47 @@ class BrowserConnection:
             self.diagnostics = {"error_code": "chrome_connection_lost"}
             raise ValueError("Chrome connection lost; this session cannot reconnect.")
 
+    def target(self, origin, session, account):
+        browser = self.get()
+        key = (origin, session, account)
+        page = self.targets.get(key)
+        if page is not None and not page.is_closed():
+            try:
+                # stdin can starve Playwright's event loop; drain close/navigation events first.
+                page.wait_for_timeout(0)
+            except PlaywrightError:
+                if not page.is_closed():
+                    raise
+        if page is None or page.is_closed():
+            if len(browser.contexts) != 1:
+                raise ValueError("Expected one approved Chrome context; cannot safely choose a profile.")
+            page = browser.contexts[0].new_page()
+            self.targets[key] = page
+            page.set_default_timeout(10000)
+            self.diagnostics = {"readiness_phase": "page_navigation"}
+            page.goto(origin + "/jira/for-you", wait_until="domcontentloaded", timeout=10000)
+        if not page.url.startswith((origin + "/jira/", origin + "/browse/")):
+            raise ValueError("CLI tab left the requested Jira site; retained without navigation or refresh.")
+        return page
+
     def __exit__(self, *exc):
+        for (origin, _, _), page in self.targets.items():
+            try:
+                if page.is_closed():
+                    continue
+                # Only discard our own verified empty legacy panel; unknown state stays visible.
+                if page in self.cleanable and page.url.startswith((origin + "/jira/", origin + "/browse/")):
+                    panel = resolve_panel(page)
+                    if panel is not None and panel.get_attribute("data-testid") == "conversation-assistant.ui.conversation-assistant":
+                        require_idle(panel)
+                        if (panel.get_by_test_id("rovo-chat-message-group").count() == 0
+                                and panel.get_by_test_id("assistant-response-card-layout").count() == 0
+                                and page.url.startswith((origin + "/jira/", origin + "/browse/"))):
+                            page.close()
+                            continue
+                print("CLI-created tab retained: empty idle state was not verified.", file=sys.stderr)
+            except (Exception, KeyboardInterrupt):
+                print("CLI-created tab retained: cleanup could not verify safe closure.", file=sys.stderr)
         browser, runtime = self.browser, self.runtime
         self.browser = self.runtime = None
         self.failed = True
@@ -105,6 +147,53 @@ def require_idle(panel):
         raise ValueError("Existing draft, attachment or active response; no prompt sent.")
 
 
+def prepare_panel(page, origin, account, diagnostics):
+    """Wait for the bound tab, opening its panel once; never reload or retry a send."""
+    deadline = time.monotonic() + 10
+    opened = more_opened = authenticated = False
+    identity = page.get_by_role("button", name=account, exact=True)
+    diagnostics.update(readiness_phase="account", readiness_timeout_ms=10000)
+    try:
+        while True:
+            if not page.url.startswith((origin + "/jira/", origin + "/browse/")):
+                raise ValueError("CLI tab left the requested Jira site during preparation.")
+            if not authenticated:
+                if identity.is_visible():
+                    authenticated = True
+                    if more_opened:
+                        page.keyboard.press("Escape")
+                        more_opened = False
+                else:
+                    more = page.get_by_role("button", name="Show more", exact=True)
+                    if not more_opened and more.is_visible():
+                        more.click(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
+                        more_opened = True
+            if authenticated:
+                diagnostics["readiness_phase"] = "panel"
+                panel = resolve_panel(page)
+                if panel is not None:
+                    diagnostics["readiness_phase"] = "composer"
+                    textbox = panel.get_by_role("textbox")
+                    if textbox.count() > 1:
+                        raise ValueError("Expected one Rovo composer; no prompt sent.")
+                    if textbox.count() == 1 and textbox.is_visible():
+                        diagnostics["readiness_phase"] = "ready"
+                        return panel
+                elif not opened:
+                    launcher = page.get_by_role("button", name="Ask Rovo", exact=True)
+                    if launcher.is_visible() and launcher.is_enabled():
+                        launcher.click(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
+                        opened = True
+            if time.monotonic() >= deadline:
+                if diagnostics["readiness_phase"] == "account":
+                    return None
+                raise ValueError("Rovo panel/composer did not become ready within 10 seconds; tab retained without refresh or submission.")
+            page.wait_for_timeout(100)
+    finally:
+        if more_opened:
+            page.keyboard.press("Escape")
+
+
 def operate(origin, session, account, prompt=None, timeout=180, images=(), github_source=None,
             chat_id=None, action="status", connection=None, chrome_port=None):
     allowed_prefixes = (origin + "/jira/", origin + "/browse/")
@@ -123,31 +212,12 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 return base | blocked | {"execution_status": "blocked", "retry_safe": False,
                                       "message": "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions."}, 4
             with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port)) as owner:
-                browser = owner.get()
-                pages = [p for context in browser.contexts for p in context.pages
-                         if p.url.startswith(allowed_prefixes)]
-                if not pages:
-                    raise ValueError("Open a /jira/ or /browse/ tab for the requested site; no tabs changed.")
-                pages = [p for p in pages if resolve_panel(p) is not None]
-                if not pages:
-                    raise ValueError("Open Rovo in a /jira/ or /browse/ tab for the requested site first; no tabs changed.")
-                if len(pages) != 1:
-                    raise ValueError("Rovo is open in multiple tabs for the requested site; leave it open only in the intended tab. No tabs changed.")
-                page = pages[0]
-                page.set_default_timeout(10000)
-                identity = page.get_by_role("button", name=account, exact=True)
-                if not identity.is_visible():
-                    more = page.get_by_role("button", name="Show more", exact=True)
-                    if not more.is_visible():
-                        return base | record | {"execution_status": "authentication_required", "retry_safe": True}, 2
-                    more.click()
-                    try:
-                        identity.wait_for(state="visible")
-                    finally:
-                        page.keyboard.press("Escape")
-                panel = resolve_panel(page)
+                page = owner.target(origin, session, account)
+                owner.cleanable.discard(page)
+                panel = prepare_panel(page, origin, account, owner.diagnostics)
+                base.update(owner.diagnostics, tab_selection="connection_owned")
                 if panel is None:
-                    raise ValueError("Open Rovo in the existing Jira tab first; this slice does not navigate or log in.")
+                    return base | record | {"execution_status": "authentication_required", "retry_safe": True}, 2
                 if panel.get_attribute("data-testid") == "conversation-assistant-mini-modal-main-container":
                     # shortcut: status only until mini-modal generation and completion are verified.
                     if prompt is None and action == "status":
@@ -162,6 +232,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Rovo mini-modal detected; generation, attachment and completion controls are unverified. No prompt sent.")
                 stop = panel.get_by_role("button", name="Stop generating", exact=True)
                 if prompt is None and action == "status":
+                    owner.cleanable.add(page)
                     return base | record | {"execution_status": "completed", "readiness": "authenticated_ui",
                                            "active_generation": stop.is_visible(), "prior_request": prior,
                                            "retry_safe": not unresolved(prior)}, 0
