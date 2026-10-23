@@ -202,10 +202,8 @@ def prepare_panel(page, origin, account, diagnostics):
                 raise ValueError("CLI tab left the requested Jira site during preparation.")
             if not authenticated:
                 if identity.is_visible():
+                    # Keep overflow open: it also contains the narrow-window Rovo launcher.
                     authenticated = True
-                    if more_opened:
-                        page.keyboard.press("Escape")
-                        more_opened = False
                 else:
                     more = page.get_by_role("button", name="Show more", exact=True)
                     if not more_opened and more.is_visible():
