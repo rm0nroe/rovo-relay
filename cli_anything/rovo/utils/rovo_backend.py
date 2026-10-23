@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from hashlib import sha256
 import json
 
-from playwright.sync_api import Error as PlaywrightError, sync_playwright
+from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from cli_anything.rovo.core.state import (
     blocking_request, bounded_answer, completed_turn, read_request, save_request, site_lock, state_dir, unresolved,
@@ -130,6 +130,47 @@ class BrowserConnection:
                     print("Chrome client cleanup failed; original operation result retained.", file=sys.stderr)
 
 
+class ClickError(ValueError):
+    def __init__(self, control, reason, timed_out):
+        self.diagnostics = {"control": control, "reason": reason, "timed_out": timed_out}
+        super().__init__(f"Click {'timed out' if timed_out else 'failed'}: {control} ({reason}).")
+
+
+def click_control(locator, control, **kwargs):
+    """Click once; control is a fixed code label, never a page title, ID or selector."""
+    try:
+        locator.click(**kwargs)
+    except PlaywrightError as error:
+        reason = "unknown"
+        header, _, log = str(error).partition("\n")
+        if "strict mode violation:" in header:
+            reason = "multiple_matches"
+        elif "Target page, context or browser has been closed" in header:
+            reason = "target_closed"
+        # Only emit our vocabulary, never copy DOM previews or locator arguments.
+        waiting = resolved = False
+        for line in log.splitlines():
+            line = re.sub(r"^\s*-\s*(?:\d+\s*×\s*)?", "", line).strip()
+            waiting |= bool(re.match(r"waiting for (?:locator|get_by_\w+|getBy\w+)\(", line))
+            resolved |= line.startswith("locator resolved to ")
+            if line in ("element is not visible", "element is not enabled", "element is not stable"):
+                reason = "not_" + line.rsplit(" ", 1)[1]
+            elif line == "element is outside of the viewport":
+                reason = "outside_viewport"
+            elif line == "element was detached from the DOM, retrying":
+                reason = "detached"
+            elif line.endswith(" intercepts pointer events"):
+                reason = "pointer_events_intercepted"
+            elif line == "click action done":
+                reason = "unknown"
+                resolved = True
+            elif line == "waiting for scheduled navigations to finish":
+                reason = "navigation_pending"
+        if reason == "unknown" and waiting and not resolved:
+            reason = "locator_not_resolved"
+        raise ClickError(control, reason, isinstance(error, PlaywrightTimeoutError)) from None
+
+
 def resolve_panel(page):
     panels = [panel for test_id in ("conversation-assistant.ui.conversation-assistant",
                                     "conversation-assistant-mini-modal-main-container")
@@ -168,7 +209,7 @@ def prepare_panel(page, origin, account, diagnostics):
                 else:
                     more = page.get_by_role("button", name="Show more", exact=True)
                     if not more_opened and more.is_visible():
-                        more.click(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
+                        click_control(more, "Show more", timeout=max(1, int((deadline - time.monotonic()) * 1000)))
                         more_opened = True
             if authenticated:
                 diagnostics["readiness_phase"] = "panel"
@@ -184,7 +225,7 @@ def prepare_panel(page, origin, account, diagnostics):
                 elif not opened:
                     launcher = page.get_by_role("button", name="Ask Rovo", exact=True)
                     if launcher.is_visible() and launcher.is_enabled():
-                        launcher.click(timeout=max(1, int((deadline - time.monotonic()) * 1000)))
+                        click_control(launcher, "Ask Rovo", timeout=max(1, int((deadline - time.monotonic()) * 1000)))
                         opened = True
             if time.monotonic() >= deadline:
                 if diagnostics["readiness_phase"] == "account":
@@ -201,8 +242,8 @@ def conversation_rows(panel):
     if not search.is_visible():
         all_chats = panel.get_by_role("button", name="View all conversations", exact=True)
         if not all_chats.is_visible():
-            panel.get_by_role("button", name="Menu", exact=True).click()
-        all_chats.click()
+            click_control(panel.get_by_role("button", name="Menu", exact=True), "Menu")
+        click_control(all_chats, "View all conversations")
     search.wait_for(state="visible")
     if search.input_value():
         raise ValueError("Conversation list has a search filter; clear it before continuing.")
@@ -215,7 +256,7 @@ def open_conversation(panel, chat_id):
     conversation_rows(panel)
     row = panel.get_by_test_id("chat-conversation-list-refresh-row-" + str(UUID(chat_id)))
     row.wait_for(state="visible")
-    row.click()
+    click_control(row, "Conversation row")
     panel.get_by_role("searchbox", name="Search conversations...", exact=True).wait_for(state="hidden")
     panel.get_by_role("textbox").wait_for(state="visible")
     panel.get_by_test_id("chat-history-container").locator(".ak-renderer-document").first.wait_for(state="visible")
@@ -330,7 +371,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 else:
                     new_chat = panel.get_by_role("button", name="New chat", exact=True)
                     if new_chat.is_enabled():
-                        new_chat.click()
+                        click_control(new_chat, "New chat")
                         page.wait_for_function("""() => document.querySelectorAll('[data-testid="assistant-response-card-layout"]').length === 0""")
                     else:
                         welcome = panel.get_by_role("heading", name=re.compile(r"^How can I help(?:, .+)?\?$"))
@@ -341,7 +382,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
                 if prompt is not None and not chat_id:
                     old_ids = observed_ids(conversation_rows(panel))
-                    panel.get_by_role("button", name="Go back to Rovo chat", exact=True).click()
+                    click_control(panel.get_by_role("button", name="Go back to Rovo chat", exact=True), "Go back to Rovo chat")
                     textbox.wait_for(state="visible")
                     if responses.count() or panel.get_by_test_id("rovo-chat-message-group").count():
                         raise ValueError("Expected empty new chat after conversation discovery; no prompt sent.")
@@ -351,22 +392,22 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 require_idle(panel)
                 if github_source is not None:
                     picker = panel.locator('button[data-spotlight-target="rovo-chat-web-search-spotlight-target"]')
-                    picker.click()
+                    click_control(picker, "Source picker (open)")
                     wanted = github_source == "on"
                     toggle = page.get_by_role("button", name="Select GitHub" if wanted else "Deselect GitHub", exact=True)
                     selected = page.get_by_role("button", name="Deselect GitHub" if wanted else "Select GitHub", exact=True)
                     if wanted:
                         page.get_by_role("checkbox", name="Search company sources", exact=True).check()
                     if toggle.is_visible():
-                        toggle.click()
+                        click_control(toggle, "Select GitHub" if wanted else "Deselect GitHub")
                     selected.wait_for(state="visible")
                     base["github_source_selected"] = wanted
-                    picker.click()
+                    click_control(picker, "Source picker (close)")
                 textbox.fill(prompt)
                 for attachment in images:
-                    panel.get_by_role("button", name="Add", exact=True).click()
+                    click_control(panel.get_by_role("button", name="Add", exact=True), "Add")
                     with page.expect_file_chooser() as chooser:
-                        page.get_by_role("menuitem", name="Upload file", exact=True).click()
+                        click_control(page.get_by_role("menuitem", name="Upload file", exact=True), "Upload file")
                     chooser.value.set_files(attachment)
                     panel.get_by_role("button", name="Remove file " + attachment["name"], exact=True).wait_for(state="visible", timeout=30000)
                     panel.get_by_role("button", name=attachment["name"][:-4] + " PNG", exact=True).wait_for(state="visible", timeout=30000)
@@ -378,7 +419,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Conversation changed before submission; inspect the retained draft.")
                 record.update(submission_state="attempted_unknown", execution_status="waiting")
                 save_request(directory, record)
-                panel.get_by_role("button", name="Submit", exact=True).click()
+                click_control(panel.get_by_role("button", name="Submit", exact=True), "Submit")
                 # A successful click is not a server acknowledgement; remain conservative.
                 deadline = time.monotonic() + timeout
                 started = False
@@ -420,7 +461,9 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             verified = record | signature | {"continuity_status": "verified"}
                             save_request(directory, verified)
                             record = verified
-                        except Exception:
+                        except Exception as error:
+                            if isinstance(error, ClickError):
+                                base["click_diagnostics"] = error.diagnostics
                             warnings.append("Answer completed, but conversation continuity could not be verified. Do not resend; inspect the chat before --chat or use --new for another task.")
                         lap("capture")
                         return base | record | bounded_answer(answer) | {
@@ -432,6 +475,8 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 return base | record | {"partial_answer": answer[:12000], "retry_safe": False}, 3
     except (Exception, KeyboardInterrupt) as error:
         # Keep the original attempted_unknown record on disk; never hide uncertainty on failure.
+        if isinstance(error, ClickError):
+            base["click_diagnostics"] = error.diagnostics
         if owner is not None:
             try:
                 owner.check()
