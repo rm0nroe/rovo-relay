@@ -33,11 +33,15 @@ class BrowserConnection:
         if not self.attempted:
             self.attempted = True
             started = time.monotonic()
+            phase = "runtime_startup"
             try:
                 self.runtime = sync_playwright()
                 pw = self.runtime.__enter__()
                 # Approval-mode Chrome can listen without a discovery file or JSON endpoint.
                 endpoint = f"ws://127.0.0.1:{self.chrome_port}/devtools/browser" if self.chrome_port else "chrome"
+                phase = "browser_attachment"
+                print("Connecting to Chrome (20-second attachment timeout). If Chrome asks, approve the connection.",
+                      file=sys.stderr, flush=True)
                 self.browser = pw.chromium.connect_over_cdp(endpoint, timeout=20000, no_defaults=True)
             except (Exception, KeyboardInterrupt) as error:
                 self.failed = True
@@ -45,6 +49,8 @@ class BrowserConnection:
                 self.diagnostics = {
                     "error_code": "chrome_debugging_unavailable" if missing else "chrome_connection_failed",
                     "attachment_elapsed_ms": round((time.monotonic() - started) * 1000),
+                    "attachment_phase": phase,
+                    "attachment_timeout_ms": 20000,
                     "next_steps": [
                         "Use Chrome 144+ in the same OS and user environment as this CLI; WSL, containers and remote terminals do not automatically discover host Chrome.",
                         "In that Chrome, open chrome://inspect/#remote-debugging and explicitly enable remote debugging if permitted by your organization.",
