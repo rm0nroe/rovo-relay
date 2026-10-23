@@ -37,6 +37,28 @@ def unresolved(record):
                 and record["execution_status"] != "completed")
 
 
+def next_action(payload, code):
+    """The one agent decision for a direct result: ask, new_or_inspect, mcp_fallback, fix_or_report or stop."""
+    status, error = payload.get("execution_status"), payload.get("error_code")
+    attempted = payload.get("submission_state") not in (None, "not_attempted")
+    if code == 4 or status == "blocked" or (attempted and status != "completed"):
+        return "stop"
+    if status == "completed":
+        # Status reports a prior unresolved request as retry_safe False; a completed ask is never retry-safe.
+        if payload.get("readiness") == "authenticated_ui_read_only" or (
+                "readiness" in payload and payload.get("retry_safe") is not True):
+            return "stop"
+        return "new_or_inspect" if payload.get("continuity_status") == "unavailable" else "ask"
+    safe = payload.get("retry_safe") is True and not attempted
+    if error == "chrome_debugging_unavailable" and safe:
+        return "mcp_fallback"
+    if error in ("continuity_unbound", "conversation_changed"):
+        return "new_or_inspect"
+    if error or status == "authentication_required":
+        return "stop"
+    return "fix_or_report" if code == 1 and safe else "stop"
+
+
 def blocking_request(directory):
     """Uncertain delivery blocks every session and both transports on this site."""
     for path in sorted(directory.parent.glob("*/request.json")):

@@ -58,6 +58,8 @@ def test_stream_reuses_connection_and_rechecks_account(browser_env, monkeypatch,
 def test_explicit_chrome_port_reuses_one_loopback_attachment(browser_env, monkeypatch, capsys):
     code, results = stream(monkeypatch, capsys, [["status"]], "--chrome-port", "9222")
     assert code == 0 and [r["exit_code"] for r in results] == [0, 0]
+    assert results[0]["version"] == rovo_cli.__version__ and "agent next action" in results[0]["implemented"]
+    assert [r["next"] for r in results] == ["ask", "ask"] and "implemented" not in results[1]
     browser_env.connect.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser", timeout=20000, no_defaults=True)
     browser_env.browser.close.assert_called_once()
     browser_env.target.submit.click.assert_not_called()

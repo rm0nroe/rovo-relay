@@ -12,7 +12,7 @@ from pathlib import Path
 import click
 
 from cli_anything.rovo import __version__
-from cli_anything.rovo.core.state import load_images, validate_target
+from cli_anything.rovo.core.state import load_images, next_action, validate_target
 from cli_anything.rovo.core.handoff import begin_handoff, finish_handoff
 from cli_anything.rovo.utils.rovo_backend import BrowserConnection, operate
 
@@ -38,15 +38,26 @@ def cli(ctx, json_mode, site, session, account, chrome_port, dry_run):
         return repl(chrome_port)
 
 
+def capabilities():
+    return {"version": __version__,
+            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action"],
+            "mcp_handoff": "agent_tools_with_local_guard"}
+
+
+def acted(result):
+    """Direct results carry the agent's next action; MCP handoff keeps its own documented flow."""
+    payload, code = result
+    return payload | {"next": next_action(payload, code)}, code
+
+
 @cli.command()
 def doctor():
     """Report runtime and packaged skill; never claims authentication."""
-    return {"schema_version": 1, "execution_status": "completed", "version": __version__,
+    return {"schema_version": 1, "execution_status": "completed", **capabilities(),
             "python": platform.python_version(), "platform": platform.system(),
             "playwright": importlib.metadata.version("playwright"),
             "skill_path": str(Path(__file__).parent / "skills" / "SKILL.md"),
-            "authenticated": "not_checked", "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity"],
-            "mcp_handoff": "agent_tools_with_local_guard",
+            "authenticated": "not_checked",
             "browser_requirement": "Direct mode needs approved Chrome debugging; skill fallback needs an already-permitted Playwright MCP session"}, 0
 
 
@@ -63,7 +74,7 @@ def status(ctx):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "site": args[0]}, 0
-    return operate(*args, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"))
+    return acted(operate(*args, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
 
 
 @cli.command()
@@ -89,8 +100,8 @@ def ask(ctx, prompt_file, timeout, image, github_source, chat, new):
                 "image_count": len(images), "image_bytes": sum(len(item["buffer"]) for item in images),
                 "conversation_mode": "new" if new else "explicit" if chat else "automatic",
                 "github_source_requested": github_source, "chat_id": str(chat) if chat else None}, 0
-    return operate(*args, prompt=prompt, timeout=timeout, images=images, github_source=github_source,
-                   chat_id=str(chat) if chat else None, new=new, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"))
+    return acted(operate(*args, prompt=prompt, timeout=timeout, images=images, github_source=github_source,
+                         chat_id=str(chat) if chat else None, new=new, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
 
 
 @cli.group()
@@ -104,7 +115,7 @@ def chat_list(ctx):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "action": "chat_list"}, 0
-    return operate(*args, action="chat_list", connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"))
+    return acted(operate(*args, action="chat_list", connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
 
 
 @chat.command("export")
@@ -114,7 +125,7 @@ def chat_export(ctx, chat_id):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "chat_id": str(chat_id)}, 0
-    return operate(*args, action="chat_export", chat_id=str(chat_id), connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"))
+    return acted(operate(*args, action="chat_export", chat_id=str(chat_id), connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
 
 
 @cli.group()
@@ -161,8 +172,8 @@ def mcp_finish(ctx, evidence_file):
 
 
 def preparation_error(error):
-    return {"schema_version": 1, "execution_status": "error", "message": str(error),
-            "submission_state": "not_attempted", "retry_safe": True}, 1
+    return acted(({"schema_version": 1, "execution_status": "error", "message": str(error),
+                   "submission_state": "not_attempted", "retry_safe": True}, 1))
 
 
 def invoke(args, command=cli, obj=None):
@@ -236,7 +247,7 @@ def session(ctx):
     with foreground_connection(ctx.obj["chrome_port"]) as connection:
         config = ctx.obj | {"connection": connection}
         result = invoke([], command=status, obj=config)
-        emit(result, stream=True)
+        emit((result[0] | capabilities(), result[1]), stream=True)
         if result[1]:
             return result[1]
         while True:
