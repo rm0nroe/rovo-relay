@@ -2,6 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from itertools import count
 
 import pytest
 from playwright.sync_api import Browser, Locator, Page
@@ -20,6 +21,7 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
                  before_submit_url=None, after_submit_url=None, layout=PANEL, empty_chat=False):
     page = MagicMock(spec=Page)
     page.url = url
+    page.is_closed.return_value = False
     panel, textbox, stop, submit, new_chat, attachments, identity, more = [
         MagicMock(spec=Locator) for _ in range(8)
     ]
@@ -81,22 +83,28 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
         root.all.return_value = [panel] if test_id == layout else []
         roots[test_id] = root
     page.get_by_test_id.side_effect = roots.__getitem__
+    launcher = MagicMock(spec=Locator)
+    launcher.is_visible.return_value = True
+    launcher.is_enabled.return_value = True
+    launcher.click.side_effect = lambda **kw: panel.is_visible.__setattr__("return_value", True)
     page.get_by_role.side_effect = lambda role, name, **kw: {
-        ACCOUNT: identity, "Show more": more,
+        ACCOUNT: identity, "Show more": more, "Ask Rovo": launcher,
     }[name]
     return SimpleNamespace(page=page, panel=panel, roots=roots, submit=submit,
                            textbox=textbox, stop=stop, attachments=attachments,
                            responses=responses, groups=groups, welcome=welcome,
-                           status=status, new_chat=new_chat)
+                           status=status, new_chat=new_chat, launcher=launcher, identity=identity)
 
 
 @pytest.fixture
 def run_browser(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(rovo_backend, "time", SimpleNamespace(monotonic=count(step=0.1).__next__))
 
-    def run(*fixtures, **kwargs):
+    def run(target=None, *, existing=(), **kwargs):
         browser = MagicMock(spec=Browser)
-        browser.contexts = [SimpleNamespace(pages=[f.page for f in fixtures])]
+        target = target or page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
+        browser.contexts = [SimpleNamespace(pages=[f.page for f in existing], new_page=MagicMock(return_value=target.page))]
         runtime = MagicMock()
         runtime.__enter__.return_value.chromium.connect_over_cdp.return_value = browser
         monkeypatch.setattr(rovo_backend, "sync_playwright", lambda: runtime)
@@ -122,26 +130,25 @@ def test_status_accepts_board_and_issue_routes(run_browser, path):
 def test_selects_only_open_panel_among_multiple_tabs(run_browser, target_path):
     closed = page_fixture(ORIGIN + "/jira/software/projects/DEMO/boards/1", panel_open=False)
     target = page_fixture(ORIGIN + target_path)
-    result, code = run_browser(closed, target)
+    result, code = run_browser(target, existing=(closed,))
     assert code == 0, result
     assert result["readiness"] == "authenticated_ui"
     closed.page.get_by_role.assert_not_called()
     target.page.get_by_role.assert_called()
 
 
-@pytest.mark.parametrize("panels, message", [
-    ([], "/browse/"), ([False, False], "Open Rovo"), ([True, True], "multiple"),
-])
-def test_missing_or_ambiguous_panel_never_sends(run_browser, tmp_path, panels, message):
-    tabs = [page_fixture(ORIGIN + f"/jira/boards/{i}", panel_open=opened)
-            for i, opened in enumerate(panels)]
-    result, code = run_browser(*tabs, prompt=PROMPT)
-    assert code == 1 and message in result["message"], result
-    assert result["submission_state"] == "not_attempted" and result["retry_safe"] is True
-    assert not list(tmp_path.rglob("request.json"))
-    for tab in tabs:
-        tab.submit.click.assert_not_called()
-        tab.page.get_by_role.assert_not_called()
+@pytest.mark.parametrize("panels", [[], [False, False], [True, True]])
+def test_existing_tabs_do_not_control_owned_tab_selection(run_browser, panels):
+    existing = [page_fixture(ORIGIN + f"/jira/boards/{i}", panel_open=opened, draft="User draft")
+                for i, opened in enumerate(panels)]
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
+    result, code = run_browser(target, existing=existing)
+    assert code == 0 and result["tab_selection"] == "connection_owned", result
+    target.page.goto.assert_called_once_with(ORIGIN + "/jira/for-you", wait_until="domcontentloaded", timeout=10000)
+    target.launcher.click.assert_called_once()
+    target.submit.click.assert_not_called()
+    for tab in existing:
+        assert not tab.page.mock_calls
 
 
 @pytest.mark.parametrize("url", [
@@ -152,7 +159,7 @@ def test_missing_or_ambiguous_panel_never_sends(run_browser, tmp_path, panels, m
 def test_unrelated_tabs_cannot_be_selected(run_browser, url):
     unrelated = page_fixture(url)
     target = page_fixture(ORIGIN + "/browse/DEMO-1")
-    result, code = run_browser(unrelated, target)
+    result, code = run_browser(target, existing=(unrelated,))
     assert code == 0, result
     unrelated.page.get_by_test_id.assert_not_called()
     unrelated.page.get_by_role.assert_not_called()
@@ -201,7 +208,7 @@ def test_navigation_before_submit_never_sends(run_browser, tmp_path, url):
 def test_navigation_after_submit_keeps_uncertainty_and_never_reselects(run_browser, tmp_path, url):
     target = page_fixture(ORIGIN + "/browse/DEMO-1", after_submit_url=url)
     other = page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
-    result, code = run_browser(target, other, prompt=PROMPT)
+    result, code = run_browser(target, existing=(other,), prompt=PROMPT)
     assert code == 1 and "after submission" in result["message"], result
     assert result["submission_state"] == "attempted_unknown" and result["retry_safe"] is False
     target.submit.click.assert_called_once()
@@ -276,7 +283,7 @@ def test_multiple_visible_roots_in_one_tab_are_rejected(run_browser, tmp_path, k
             )
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and "multiple" in result["message"].lower(), result
-    target.page.get_by_role.assert_not_called()
+    target.launcher.click.assert_not_called()
     target.textbox.fill.assert_not_called()
     target.new_chat.click.assert_not_called()
     target.submit.click.assert_not_called()
@@ -365,14 +372,14 @@ def test_disabled_new_chat_rejects_unverified_empty_states(run_browser, tmp_path
     assert not list(tmp_path.rglob("request.json"))
 
 
-def test_legacy_and_mini_modal_in_different_tabs_are_ambiguous(run_browser):
+def test_existing_legacy_and_mini_modal_panels_are_untouched(run_browser):
     legacy = page_fixture(ORIGIN + "/jira/for-you")
     mini = page_fixture(ORIGIN + "/browse/DEMO-1", layout=MINI_PANEL)
-    result, code = run_browser(legacy, mini, prompt=PROMPT)
-    assert code == 1 and "multiple tabs" in result["message"], result
-    for target in (legacy, mini):
-        target.page.get_by_role.assert_not_called()
-        target.submit.click.assert_not_called()
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
+    result, code = run_browser(target, existing=(legacy, mini))
+    assert code == 0, result
+    for existing in (legacy, mini):
+        assert not existing.page.mock_calls
 
 
 @pytest.mark.parametrize("prompt", [None, PROMPT])
@@ -383,13 +390,16 @@ def test_mini_modal_wrong_account_is_not_authenticated(run_browser, prompt):
     target.submit.click.assert_not_called()
 
 
-def test_panel_disappearing_after_account_check_does_not_reselect(run_browser, tmp_path):
-    target = page_fixture(ORIGIN + "/browse/DEMO-1")
-    target.roots[PANEL].all.side_effect = [[target.panel], []]
+def test_missing_panel_wait_is_bounded_and_launcher_is_not_retried(run_browser, tmp_path):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1", panel_open=False)
+    target.launcher.click.side_effect = None
     result, code = run_browser(target, prompt=PROMPT)
-    assert code == 1 and "Open Rovo" in result["message"], result
+    assert code == 1 and result["readiness_phase"] == "panel", result
+    assert "without refresh" in result["message"]
+    target.launcher.click.assert_called_once()
     target.textbox.fill.assert_not_called()
     target.submit.click.assert_not_called()
+    target.page.reload.assert_not_called()
     assert not list(tmp_path.rglob("request.json"))
 
 
@@ -428,3 +438,83 @@ def test_mini_modal_status_requires_one_visible_composer(run_browser, tmp_path, 
     target.new_chat.click.assert_not_called()
     target.submit.click.assert_not_called()
     assert not list(tmp_path.rglob("request.json"))
+
+
+@pytest.mark.parametrize("delayed", ["account", "panel", "composer"])
+def test_delayed_readiness_waits_without_refresh_or_duplicate_open(run_browser, delayed):
+    from itertools import chain, repeat
+
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
+    control = {"account": target.identity, "panel": target.panel, "composer": target.textbox}[delayed]
+    control.is_visible.side_effect = chain([False, False], repeat(True))
+    result, code = run_browser(target)
+    assert code == 0 and result["readiness_phase"] == "ready", result
+    assert target.page.wait_for_timeout.call_count >= 1
+    assert target.launcher.click.call_count <= 1
+    target.page.reload.assert_not_called()
+    target.submit.click.assert_not_called()
+
+
+def test_wrong_account_never_opens_rovo(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=False, authenticated=False)
+    result, code = run_browser(target)
+    assert code == 2 and result["readiness_phase"] == "account", result
+    target.launcher.click.assert_not_called()
+    target.page.reload.assert_not_called()
+    target.page.close.assert_not_called()
+
+
+def test_navigation_while_waiting_stops_preparation(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
+    target.launcher.click.side_effect = lambda **kw: setattr(target.page, "url", "https://other.atlassian.net/jira/for-you")
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and "during preparation" in result["message"], result
+    target.textbox.fill.assert_not_called()
+    target.submit.click.assert_not_called()
+    target.page.reload.assert_not_called()
+    target.page.close.assert_not_called()
+
+
+def test_only_verified_empty_owned_legacy_tab_is_closed(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
+    user = page_fixture(ORIGIN + "/browse/DEMO-1", empty_chat=True)
+    result, code = run_browser(target, existing=(user,))
+    assert code == 0, result
+    target.page.close.assert_called_once()
+    assert not user.page.mock_calls
+
+
+@pytest.mark.parametrize("state", ["draft", "attachment", "generating", "response", "mini", "hidden"])
+def test_cleanup_preserves_any_nonempty_or_unverified_owned_tab(run_browser, state):
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True,
+                          draft="User draft" if state == "draft" else "",
+                          layout=MINI_PANEL if state == "mini" else PANEL)
+    target.attachments.count.return_value = int(state == "attachment")
+    target.stop.is_visible.return_value = state == "generating"
+    target.responses.count.return_value = int(state == "response")
+    target.textbox.is_visible.return_value = state != "hidden"
+    run_browser(target)
+    target.page.close.assert_not_called()
+    target.page.reload.assert_not_called()
+
+
+def test_uncertain_send_never_closes_even_an_empty_owned_tab(run_browser, tmp_path):
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
+    target.submit.click.side_effect = RuntimeError("Connection lost during submit")
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and result["submission_state"] == "attempted_unknown", result
+    target.page.close.assert_not_called()
+    target.submit.click.assert_called_once()
+    assert read_request(state_dir(tmp_path, ORIGIN, "probe"))["submission_state"] == "attempted_unknown"
+
+
+def test_cleanup_rechecks_origin_after_pending_navigation_events(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
+
+    def deliver_navigation():
+        target.page.url = "https://other.atlassian.net/jira/for-you"
+        return 0
+
+    target.groups.count.side_effect = deliver_navigation
+    assert run_browser(target)[1] == 0
+    target.page.close.assert_not_called()

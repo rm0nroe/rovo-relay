@@ -3,6 +3,7 @@ import io
 import json
 import signal
 import sys
+from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -22,13 +23,14 @@ FLAGS = ["--site", ORIGIN, "--session", "pilot", "--account", ACCOUNT]
 def browser_env(monkeypatch, tmp_path):
     target = page_fixture(ORIGIN + "/browse/DEMO-1")
     browser = MagicMock(spec=Browser)
-    browser.contexts = [SimpleNamespace(pages=[target.page])]
+    browser.contexts = [SimpleNamespace(pages=[], new_page=MagicMock(return_value=target.page))]
     browser.is_connected.return_value = True
     runtime = MagicMock()
     connect = runtime.__enter__.return_value.chromium.connect_over_cdp
     connect.return_value = browser
     monkeypatch.setattr(rovo_backend, "sync_playwright", lambda: runtime)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(rovo_backend, "time", SimpleNamespace(monotonic=count(step=0.1).__next__))
     return SimpleNamespace(target=target, browser=browser, runtime=runtime, connect=connect)
 
 
@@ -42,7 +44,8 @@ def stream(monkeypatch, capsys, lines, *flags):
 def test_stream_reuses_connection_and_rechecks_account(browser_env, monkeypatch, capsys):
     env = browser_env
     identity = env.target.page.get_by_role("button", name=ACCOUNT, exact=True)
-    identity.is_visible.side_effect = [True, True, False]
+    from itertools import chain, repeat
+    identity.is_visible.side_effect = chain([True, True], repeat(False))
     code, results = stream(monkeypatch, capsys, [["status"], ["status"]])
     assert code == 2 and [r["exit_code"] for r in results] == [0, 0, 2]
     assert results[-1]["execution_status"] == "authentication_required"
@@ -133,13 +136,14 @@ def test_startup_is_flushed_before_input_and_lock_released(browser_env, monkeypa
     browser_env.browser.close.assert_called_once()
 
 
-def test_each_operation_reselects_tabs_but_never_reconnects(browser_env):
+def test_closed_owned_tab_is_replaced_without_reconnecting(browser_env):
     env = browser_env
     with rovo_backend.BrowserConnection() as connection:
         first, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
         assert code == 0, first
         second = page_fixture(ORIGIN + "/jira/for-you", layout=MINI_PANEL)
-        env.browser.contexts[0].pages = [second.page]
+        env.target.page.is_closed.return_value = True
+        env.browser.contexts[0].new_page.return_value = second.page
         result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
         assert code == 0 and result["readiness"] == "authenticated_ui_read_only"
         env.browser.close.assert_not_called()
@@ -368,7 +372,7 @@ def test_delivery_checks_repeat_between_commands(browser_env, monkeypatch, capsy
 
 def test_mini_modal_stream_never_sends_or_lists(browser_env, monkeypatch, capsys, tmp_path):
     target = page_fixture(ORIGIN + "/browse/DEMO-1", layout=MINI_PANEL)
-    browser_env.browser.contexts[0].pages = [target.page]
+    browser_env.browser.contexts[0].new_page.return_value = target.page
     prompt = tmp_path / "prompt.txt"
     prompt.write_text(PROMPT)
     code, results = stream(monkeypatch, capsys, [["ask", "--prompt-file", str(prompt)],
@@ -439,3 +443,87 @@ def test_repl_cannot_nest_another_session(browser_env, monkeypatch, capsys):
     assert len(results) == 2 and results[-1]["execution_status"] == "error"
     browser_env.connect.assert_called_once()
     browser_env.browser.close.assert_called_once()
+
+
+def test_owned_tab_is_reused_when_other_rovo_tabs_appear(browser_env):
+    env = browser_env
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)[1] == 0
+        unrelated = page_fixture(ORIGIN + "/browse/DEMO-2", draft="User draft")
+        env.browser.contexts[0].pages = [unrelated.page]
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)[1] == 0
+        env.browser.contexts[0].new_page.assert_called_once()
+        env.target.page.goto.assert_called_once()
+        assert not unrelated.page.mock_calls
+        env.target.page.reload.assert_not_called()
+
+
+@pytest.mark.parametrize("contexts", [0, 2])
+def test_ambiguous_or_missing_chrome_context_never_creates_page(browser_env, contexts):
+    env = browser_env
+    context = env.browser.contexts[0]
+    env.browser.contexts = [context] * contexts
+    result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT)
+    assert code == 1 and "context" in result["message"], result
+    context.new_page.assert_not_called()
+
+
+def test_closed_tab_cannot_bypass_unresolved_delivery(browser_env, tmp_path):
+    env = browser_env
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)[1] == 0
+        env.target.page.is_closed.return_value = True
+        directory = state_dir(tmp_path, ORIGIN, "other")
+        with site_lock(directory):
+            save_request(directory, {"submission_state": "attempted_unknown", "execution_status": "waiting"})
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
+        assert code == 4 and result["retry_safe"] is False
+        env.browser.contexts[0].new_page.assert_called_once()
+
+
+def test_navigated_owned_tab_is_not_replaced_or_reloaded(browser_env):
+    env = browser_env
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)[1] == 0
+        env.target.page.url = "https://other.atlassian.net/jira/for-you"
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
+        assert code == 1 and "left the requested" in result["message"], result
+        env.browser.contexts[0].new_page.assert_called_once()
+        env.target.page.goto.assert_called_once()
+        env.target.page.reload.assert_not_called()
+    env.target.page.close.assert_not_called()
+
+
+def test_navigation_timeout_can_finish_loading_without_another_navigation(browser_env):
+    env = browser_env
+    env.target.page.goto.side_effect = Error("Navigation timeout")
+    with rovo_backend.BrowserConnection() as connection:
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
+        assert code == 1 and result["readiness_phase"] == "page_navigation", result
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
+        assert code == 0, result
+        env.target.page.goto.assert_called_once()
+        env.target.page.reload.assert_not_called()
+        env.browser.contexts[0].new_page.assert_called_once()
+
+
+def test_tab_closed_while_stdin_waits_drains_cached_events_before_selection(browser_env):
+    env = browser_env
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)[1] == 0
+        replacement = page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
+        env.browser.contexts[0].new_page.return_value = replacement.page
+
+        def deliver_close_event(delay):
+            assert delay == 0
+            env.target.page.is_closed.return_value = True
+            raise Error("Target page, context or browser has been closed")
+
+        env.target.page.wait_for_timeout.side_effect = deliver_close_event
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection)
+        assert code == 0 and result["readiness_phase"] == "ready", result
+        assert env.browser.contexts[0].new_page.call_count == 2
+        replacement.launcher.click.assert_called_once()
+        env.target.submit.click.assert_not_called()
+        replacement.submit.click.assert_not_called()
+    env.connect.assert_called_once()
