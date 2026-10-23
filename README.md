@@ -119,7 +119,7 @@ A site-level lock serializes this harness's commands. It cannot prevent another 
 
 Use the [copy-and-paste Copilot setup prompt](docs/COPILOT_SETUP_PROMPT.md) to install and test on another machine.
 
-Invoke the skill as `/ask-rovo`. The repository includes `.github/skills/ask-rovo/SKILL.md`, with its `MCP_FALLBACK.md` reference, both also bundled in the package. To use it in another project, review and copy the entire `ask-rovo` skill folder without overwriting local customizations. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Actual VS Code invocation still needs acceptance on the target machine.
+Invoke the skill as `/ask-rovo`. The repository includes `.github/skills/ask-rovo/SKILL.md`, with its `MCP_FALLBACK.md` and `TROUBLESHOOTING.md` references, all also bundled in the package. Every direct result carries `next` (`ask`, `new_or_inspect`, `mcp_fallback`, `fix_or_report` or `stop`), so the skill stays a short table and loads its references only when a result needs them. The session's first line also carries `version` and `implemented`, replacing a separate `doctor` call per ask, and completed results include per-phase `timings_ms`. To use it in another project, review and copy the entire `ask-rovo` skill folder without overwriting local customizations. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Actual VS Code invocation still needs acceptance on the target machine.
 
 ### Automatic MCP fallback
 

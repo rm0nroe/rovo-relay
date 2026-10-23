@@ -28,6 +28,10 @@ class TestCLISubprocess:
         assert Path(result["skill_path"]).is_file()
         assert "\nname: ask-rovo\n" in Path(result["skill_path"]).read_text()
         assert Path(result["skill_path"]).with_name("MCP_FALLBACK.md").is_file()
+        assert Path(result["skill_path"]).with_name("TROUBLESHOOTING.md").is_file()
+        # The skill is read on every invocation; keep its token cost bounded.
+        assert len(Path(result["skill_path"]).read_bytes()) < 3000
+        assert "agent next action" in result["implemented"]
         assert result["mcp_handoff"] == "agent_tools_with_local_guard"
 
     def test_invalid_argument_json_no_submission(self):
@@ -35,6 +39,7 @@ class TestCLISubprocess:
         assert output.returncode == 1
         result = json.loads(output.stdout)
         assert result["schema_version"] == 1 and result["submission_state"] == "not_attempted"
+        assert result["next"] == "fix_or_report"
 
     def test_dry_run_does_not_contact_browser(self, tmp_path):
         prompt = tmp_path / "prompt.txt"

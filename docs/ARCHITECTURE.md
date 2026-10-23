@@ -28,6 +28,10 @@ CLI-Anything supplies the development methodology and REPL presentation. The ins
 
 Completed means a response was obtained. It does not verify facts, prove GitHub retrieval or enforce read-only behavior. Uncertain delivery is never automatically resubmitted.
 
+## Agent next action
+
+Every direct status, ask and chat result, including preparation errors, carries `next`, computed by `next_action` in `core/state.py` from the same fields the guards already set: `ask` (ready, or a verified follow-up may be sent), `new_or_inspect` (continuity unbound, changed or unavailable; a completed answer is never resent), `mcp_fallback` (pre-submission `chrome_debugging_unavailable`), `fix_or_report` (nothing sent) and `stop` (blocked, uncertain, layout, connection or authentication). It interprets results; it never relaxes a guard. MCP `begin/finish` keep their documented flow. The session's first line merges `version`, `implemented` and `mcp_handoff`. Completed operations include `timings_ms` for `attach`, `prepare`, `select`, `generate` and `capture` where reached; `attach` is near zero for a retained connection.
+
 ## Foreground session
 
 `session` freezes site/account/request-session/dry-run policy, emits an initial status and reads JSON argv arrays from stdin. Existing Click handlers parse status, ask and chat commands; every result is schema 1 with a flushed `exit_code`. Help, MCP, nested sessions, global overrides and stdin prompt files are rejected. Invalid input or preparation errors are recoverable. Authentication failure, blocked delivery, interruption, lost connection and unsuccessful possibly-submitted operations terminate the stream. A completed ask can continue despite `retry_safe: false` without resending that turn. EOF triggers guarded owned-tab cleanup and detachment; dry-run session emits once without attachment or reading input.

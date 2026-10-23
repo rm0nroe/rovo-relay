@@ -242,7 +242,14 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
     record = {"request_id": str(uuid4()), "site": origin, "account": account, "chat_id": chat_id,
               "submission_state": "not_attempted", "execution_status": "prepared"}
     owner = connection
-    started_at = time.monotonic()
+    started_at = lap_at = time.monotonic()
+    timings = {}
+
+    def lap(name):
+        nonlocal lap_at
+        now = time.monotonic()
+        timings[name] = round((now - lap_at) * 1000)
+        lap_at = now
     base = {"schema_version": 1, "browser_mode": "existing_chrome", "context_percent": None,
             "retrieval_assessment": "unverified", "chat_id": chat_id}
     try:
@@ -256,17 +263,23 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
             if new and chat_id:
                 raise ValueError("Use either --new or --chat, not both.")
             if automatic:
-                if (prior.get("site") != origin or prior.get("account") != account
-                        or prior.get("continuity_status") != "verified" or not prior.get("chat_id")):
-                    raise ValueError("No verified conversation binding for this session/account. Use --new or an observed --chat UUID.")
-                chat_id = str(UUID(prior["chat_id"]))
+                try:
+                    if (prior.get("site") != origin or prior.get("account") != account
+                            or prior.get("continuity_status") != "verified"):
+                        raise ValueError
+                    chat_id = str(UUID(prior["chat_id"]))
+                except (ValueError, TypeError, AttributeError, KeyError):
+                    base["error_code"] = "continuity_unbound"
+                    raise ValueError("No verified conversation binding for this session/account. Use --new or an observed --chat UUID.") from None
                 record["chat_id"] = chat_id
             base["conversation_mode"] = "continued" if chat_id else "new"
             with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port)) as owner:
                 page = owner.target(origin, session, account)
+                lap("attach")
                 owner.cleanable.discard(page)
                 panel = prepare_panel(page, origin, account, owner.diagnostics)
-                base.update(owner.diagnostics, tab_selection="connection_owned")
+                lap("prepare")
+                base.update(owner.diagnostics, tab_selection="connection_owned", timings_ms=timings)
                 if panel is None:
                     return base | record | {"execution_status": "authentication_required", "retry_safe": True}, 2
                 if panel.get_attribute("data-testid") == "conversation-assistant-mini-modal-main-container":
@@ -299,6 +312,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                        "coverage": "loaded_only", "truncated": rows.count() > 100}, 0
                     open_conversation(panel, chat_id)
                     if automatic and turn_signature(panel) != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
+                        base["error_code"] = "conversation_changed"
                         raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
                     if action == "chat_export":
                         turns = panel.get_by_test_id("rovo-chat-message-group").evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
@@ -331,6 +345,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     textbox.wait_for(state="visible")
                     if responses.count() or panel.get_by_test_id("rovo-chat-message-group").count():
                         raise ValueError("Expected empty new chat after conversation discovery; no prompt sent.")
+                lap("select")
                 before = responses.count()
                 selected_turn = turn_signature(panel) if chat_id else None
                 require_idle(panel)
@@ -382,11 +397,11 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     if completed_turn(started=started, count=count, status=status,
                                       generating=generating, answer=answer, before=before,
                                       prompt_matches=user_text.strip() == prompt.strip()):
+                        lap("generate")
                         record.update(execution_status="completed", submission_state="observed_submitted")
                         record["continuity_status"] = "unavailable"
                         save_request(directory, record)
-                        warnings = ["Citation extraction is not implemented.",
-                                    "Completed means Rovo responded, not that retrieval or facts were verified."]
+                        warnings = []
                         try:
                             signature = {"turn_count": groups.count(),
                                          "turn_sha256": sha256(json.dumps([prompt.strip(), answer.strip()]).encode()).hexdigest()}
@@ -407,6 +422,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             record = verified
                         except Exception:
                             warnings.append("Answer completed, but conversation continuity could not be verified. Do not resend; inspect the chat before --chat or use --new for another task.")
+                        lap("capture")
                         return base | record | bounded_answer(answer) | {
                             "retry_safe": False, "image_count": len(images), "elapsed_ms": round((time.monotonic()-started_at)*1000),
                             "warnings": warnings}, 0

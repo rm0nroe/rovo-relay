@@ -3,7 +3,7 @@ import json
 import pytest
 
 from cli_anything.rovo.core.state import (
-    bounded_answer, completed_turn, load_images, read_request, save_request, site_lock, state_dir, unresolved, validate_target,
+    bounded_answer, completed_turn, load_images, next_action, read_request, save_request, site_lock, state_dir, unresolved, validate_target,
 )
 
 
@@ -105,3 +105,26 @@ def test_missing_chrome_endpoint_gives_safe_setup_steps(monkeypatch, tmp_path, p
     assert "/private-fixture/" not in json.dumps(result)
     assert not list(tmp_path.rglob("request.json"))
     assert not list(tmp_path.rglob("control.lock"))
+
+
+@pytest.mark.parametrize("payload,code,expected", [
+    ({"execution_status": "blocked", "submission_state": "attempted_unknown", "retry_safe": False}, 4, "stop"),
+    ({"execution_status": "timeout", "submission_state": "attempted_unknown", "retry_safe": False}, 3, "stop"),
+    ({"execution_status": "error", "submission_state": "attempted_unknown", "retry_safe": False}, 1, "stop"),
+    ({"execution_status": "completed", "readiness": "authenticated_ui_read_only", "retry_safe": True}, 0, "stop"),
+    ({"execution_status": "completed", "readiness": "authenticated_ui", "retry_safe": False}, 0, "stop"),
+    ({"execution_status": "completed", "readiness": "authenticated_ui", "retry_safe": True}, 0, "ask"),
+    ({"execution_status": "completed", "submission_state": "observed_submitted", "continuity_status": "verified", "retry_safe": False}, 0, "ask"),
+    ({"execution_status": "completed", "submission_state": "observed_submitted", "continuity_status": "unavailable", "retry_safe": False}, 0, "new_or_inspect"),
+    ({"execution_status": "completed", "chats": []}, 0, "ask"),
+    ({"execution_status": "error", "error_code": "chrome_debugging_unavailable", "submission_state": "not_attempted", "retry_safe": True}, 1, "mcp_fallback"),
+    ({"execution_status": "error", "error_code": "continuity_unbound", "submission_state": "not_attempted", "retry_safe": True}, 1, "new_or_inspect"),
+    ({"execution_status": "error", "error_code": "conversation_changed", "submission_state": "not_attempted", "retry_safe": True}, 1, "new_or_inspect"),
+    ({"execution_status": "error", "error_code": "rovo_layout_unverified", "submission_state": "not_attempted", "retry_safe": True}, 1, "stop"),
+    ({"execution_status": "error", "error_code": "chrome_connection_failed", "submission_state": "not_attempted", "retry_safe": True}, 1, "stop"),
+    ({"execution_status": "authentication_required", "submission_state": "not_attempted", "retry_safe": True}, 2, "stop"),
+    ({"execution_status": "error", "submission_state": "not_attempted", "retry_safe": True}, 1, "fix_or_report"),
+    ({"execution_status": "interrupted", "submission_state": "not_attempted", "retry_safe": True}, 3, "stop"),
+])
+def test_next_action_maps_every_result_to_one_agent_decision(payload, code, expected):
+    assert next_action(payload, code) == expected

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from cli_anything.rovo import rovo_cli
-from cli_anything.rovo.core.state import read_request, save_request, site_lock, state_dir
+from cli_anything.rovo.core.state import next_action, read_request, save_request, site_lock, state_dir
 from cli_anything.rovo.utils import rovo_backend
 from test_browser_tabs import ACCOUNT, ORIGIN, PROMPT, page_fixture, run_browser
 
@@ -15,7 +15,8 @@ OTHER = "22345678-1234-4234-8234-123456789abc"
 def completed(run_browser):
     result, code = run_browser(prompt=PROMPT)
     assert code == 0 and result["continuity_status"] == "verified", result
-    assert result["chat_id"] == CHAT
+    assert result["chat_id"] == CHAT and next_action(result, code) == "ask"
+    assert set(result["timings_ms"]) == {"attach", "prepare", "select", "generate", "capture"}
     return result
 
 
@@ -52,6 +53,7 @@ def test_changed_saved_history_stops_before_fill(run_browser, change):
         target.groups.count.return_value = 2
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and "changed" in result["message"], result
+    assert result["error_code"] == "conversation_changed" and next_action(result, code) == "new_or_inspect"
     target.textbox.fill.assert_not_called()
     target.submit.click.assert_not_called()
 
@@ -67,6 +69,7 @@ def test_invalid_binding_never_attaches(run_browser, tmp_path, change):
     target = existing()
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and result["submission_state"] == "not_attempted", result
+    assert result["error_code"] == "continuity_unbound" and next_action(result, code) == "new_or_inspect"
     target.page.goto.assert_not_called()
     target.submit.click.assert_not_called()
 
@@ -78,6 +81,7 @@ def test_capture_failure_preserves_answer_and_blocks_implicit_followup(run_brows
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 0 and result["answer"] == "Synthetic answer", result
     assert result["continuity_status"] == "unavailable" and result["retry_safe"] is False
+    assert next_action(result, code) == "new_or_inspect"
     assert read_request(state_dir(tmp_path, ORIGIN, "probe"))["execution_status"] == "completed"
     assert run_browser(prompt=PROMPT)[1] == 1
     target.submit.click.assert_called_once()
