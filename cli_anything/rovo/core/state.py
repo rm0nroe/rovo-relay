@@ -106,6 +106,12 @@ def save_request(directory, record):
             os.unlink(name)
 
 
+def plain(text):
+    """Prompt text as the composer, the rendered turn and Rovo's data all show it: non-blank lines,
+    spaces collapsed. Rovo's editor turns each line into a paragraph, adding blank lines between."""
+    return "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
+
+
 def completed_turn(*, started, count, status, generating, answer, before=0, prompt_matches=True, new_id=False):
     """new_id: the last turn carries a message ID the chat did not have before submit. A virtualized
     panel can drop an old turn as the new one renders, so the count alone cannot prove a new turn."""
@@ -122,7 +128,7 @@ def delivered(messages, prompt_sha256, before):
     """(reply, None) when the prompt appears exactly once as a human turn after the first `before`
     turns and Rovo answered it; otherwise (None, reason)."""
     humans = [i for i, message in enumerate(messages) if message["role"] == "HUMAN"]
-    sent = [i for i in humans[before:] if sha256(messages[i]["text"].strip().encode()).hexdigest() == prompt_sha256]
+    sent = [i for i in humans[before:] if sha256(plain(messages[i]["text"]).encode()).hexdigest() == prompt_sha256]
     if not sent:
         return None, "prompt_missing"
     if len(sent) > 1:

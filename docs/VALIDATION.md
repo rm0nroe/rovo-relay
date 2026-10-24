@@ -1,5 +1,13 @@
 # Validation status
 
+## Verified multi-line prompts (2026-10-24)
+
+Any prompt with a line break was refused before Submit (`Target or draft changed before submission`, `not_attempted`, nothing sent). Rovo's editor turns each line of the filled text into a paragraph, so the composer's text gains blank lines (and a trailing break) and never equalled the prompt. The rendered turn shows the same blank lines, so completion and the turn signature would also have missed it. All of these comparisons now use one rule (`state.plain`): non-blank lines, spaces collapsed. That rule also covers the prompt hash and Rovo's stored text, where an ADF hard break now counts as a line break. A draft whose words changed is still refused.
+
+Live, installed candidate, 1 question. A three-line prompt with a blank line, sent as an explicit `--chat` follow-up with `--timeout 1`: exit 3 `timeout`, `turns_before: 2` from Rovo's data, the hash of the normalized prompt saved. `status` then said `next: reconcile`, and `reconcile` exited 0 with Rovo's own data proving delivery. `status` was then unblocked.
+
+Offline: 376 passed and 14 opt-in skipped; 390 passed with `ROVO_DOM_CHECK=1`; installed 376 with 14 skipped; 15 packaged files and 4 mirrors match.
+
 ## Verified guarded reconcile (2026-10-24)
 
 An uncertain attempt (`attempted_unknown`) blocks every send on the site, and until now only a manual record edit could lift it. `reconcile` is the guarded way out. It never sends. Before Submit, an ask now saves the prompt's SHA-256 and the chat's turn count from Rovo's own data (`turns_before`; never the virtualized page's count, so it is null when that data is missing). A new chat that times out also saves the chat ID named by its one observed send. `reconcile` opens that chat in its own tab, reads Rovo's `messages` data and lifts the block only if the history is complete, the prompt hash matches exactly one human turn after `turns_before`, and a non-empty answer follows. A prompt asked earlier in the same chat therefore cannot pass for this attempt. On success the record becomes `completed` / `observed_submitted` / `continuity_status: unavailable` and keeps the original under `reconciled.original`. Anything else changes nothing and reports `reconcile_reason`. A blocked result says `reconcilable: true` and `next: reconcile` only for this session's own provable record.
@@ -16,7 +24,7 @@ Live, installed candidate, 2 questions:
 | Continued chat: explicit `--chat` follow-up with `--timeout 1` | Exit 3 `timeout`; `turns_before: 1` taken from Rovo's data; `status` said `next: reconcile` |
 | `reconcile` | Exit 0; the prompt matched once after the first turn; answer returned; `status` then unblocked |
 
-Offline: 372 passed and 13 opt-in skipped; 385 passed with `ROVO_DOM_CHECK=1`; installed 372 with 13 skipped. Unverified live: multi-paragraph prompts, whose text Rovo stores as ADF blocks; a mismatch fails closed as `prompt_missing`. Not reconcilable by design: records written before this change, MCP reservations, a new chat whose send was not seen exactly once (for example an error after Submit), and another session's record.
+Offline: 372 passed and 13 opt-in skipped; 385 passed with `ROVO_DOM_CHECK=1`; installed 372 with 13 skipped. Multi-paragraph prompts were verified later; see [Verified multi-line prompts](#verified-multi-line-prompts-2026-10-24). Not reconcilable by design: records written before this change, MCP reservations, a new chat whose send was not seen exactly once (for example an error after Submit), and another session's record.
 
 ## Verified long chats (2026-10-24)
 

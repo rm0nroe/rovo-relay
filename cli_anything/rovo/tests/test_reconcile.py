@@ -11,11 +11,11 @@ from test_browser_tabs import ACCOUNT, ORIGIN, PROMPT, history, page_fixture, ru
 CHAT = "12345678-1234-4234-8234-123456789abc"
 
 
-def timed_out(run_browser):
+def timed_out(run_browser, prompt=PROMPT):
     """A real new-chat ask that times out after its one send, leaving the site blocked."""
     target = page_fixture(ORIGIN + "/jira/for-you")
     target.status.inner_text.side_effect = repeat("Rovo is thinking")
-    result, code = run_browser(target, prompt=PROMPT, timeout=1)
+    result, code = run_browser(target, prompt=prompt, timeout=1)
     assert code == 3 and result["execution_status"] == "timeout", result
     return result
 
@@ -177,3 +177,56 @@ def test_signed_out_reconcile_keeps_the_attempt_unsafe(run_browser):
     timed_out(run_browser)
     result, code = run_browser(page_fixture(ORIGIN + "/jira/for-you", authenticated=False), action="reconcile")
     assert code == 2 and result["retry_safe"] is False and next_action(result, code) == "stop", result
+
+
+# Multi-line prompts: Rovo's editor makes each line a paragraph, so the composer and the rendered turn
+# show blank lines between lines (and a trailing break), and Rovo stores ADF blocks.
+MULTI = "RECON: first paragraph.\n\nSecond paragraph, line one.\nSecond paragraph, line two."
+
+
+def rendered(text):
+    return "\n\n".join(text.split("\n")) + "\n\n"
+
+
+def editor(target, change=lambda text: text):
+    fill = target.textbox.fill.side_effect
+    target.textbox.fill.side_effect = lambda text: (fill(text), setattr(target.textbox.inner_text, "return_value", rendered(change(text))))
+    target.user.inner_text.return_value = rendered(MULTI)
+    return target
+
+
+def test_multiline_prompt_completes_through_the_editor(run_browser, tmp_path):
+    result, code = run_browser(editor(page_fixture(ORIGIN + "/jira/for-you")), prompt=MULTI)
+    assert code == 0 and result["answer"] == "Synthetic answer" and not result.get("warnings"), result
+    stored = read_request(state_dir(tmp_path, ORIGIN, "probe"))
+    assert stored["prompt_sha256"] == sha256("RECON: first paragraph.\nSecond paragraph, line one.\nSecond paragraph, line two.".encode()).hexdigest()
+
+
+def test_changed_multiline_draft_never_sends(run_browser):
+    target = editor(page_fixture(ORIGIN + "/jira/for-you"), lambda text: text.replace("two", "2"))
+    result, code = run_browser(target, prompt=MULTI)
+    assert code == 1 and "Target or draft changed" in result["message"], result
+    target.submit.click.assert_not_called()
+
+
+def paragraph(*inline):
+    return {"type": "paragraph", **({"content": list(inline)} if inline else {})}
+
+
+TEXT = lambda text: {"type": "text", "text": text}
+BREAK = {"type": "hardBreak"}
+
+
+@pytest.mark.parametrize("blocks", [
+    # As observed live from fill(): one paragraph per line, an empty one for the blank line, a trailing break.
+    [paragraph(TEXT("RECON: first paragraph.")), paragraph(), paragraph(TEXT("Second paragraph, line one.")),
+     paragraph(TEXT("Second paragraph, line two."), BREAK)],
+    # Typed with Shift+Enter: lines of one paragraph joined by hard breaks.
+    [paragraph(TEXT("RECON: first paragraph.")), paragraph(TEXT("Second paragraph, line one."), BREAK, TEXT("Second paragraph, line two."))],
+])
+def test_multiline_prompt_is_proved_from_rovo_blocks(run_browser, blocks):
+    timed_out(run_browser, MULTI)
+    items = [{"id": "id-q", "role": "HUMAN", "content": {"type": "doc", "content": blocks}},
+             {"id": "id-a", "role": "ASSISTANT", "content": "Late answer"}]
+    result, code = run_browser(reopened(items), action="reconcile")
+    assert code == 0 and result["answer"] == "Late answer", result

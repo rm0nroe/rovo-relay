@@ -13,7 +13,7 @@ from playwright.sync_api import Error as PlaywrightError, TimeoutError as Playwr
 from cli_anything.rovo.utils.chrome_approval import ApprovalError, ChromeApproval
 
 from cli_anything.rovo.core.state import (
-    blocking_request, bounded_answer, completed_turn, delivered, provable, read_request, save_request, site_lock, state_dir, unresolved,
+    blocking_request, bounded_answer, completed_turn, delivered, plain, provable, read_request, save_request, site_lock, state_dir, unresolved,
 )
 
 
@@ -351,10 +351,10 @@ HISTORY_URL = r"/gateway/api/assist/rovo/v1/chat/(?:conversations|conversation/(
 
 
 def message_text(content):
-    """Plain text of one Rovo message: markdown as sent, or ADF text with one line per block."""
+    """Plain text of one Rovo message: markdown as sent, or ADF text with one line per block or hard break."""
     if isinstance(content, str):
         return content
-    text = lambda node: node.get("text", "") + "".join(text(child) for child in node.get("content", []))
+    text = lambda node: ("\n" if node.get("type") == "hardBreak" else node.get("text", "")) + "".join(text(child) for child in node.get("content", []))
     return "\n".join(text(block) for block in content["content"]).strip()
 
 
@@ -474,7 +474,7 @@ def open_conversation(panel, chat_id, history):
 def turn_signature(panel):
     groups = panel.get_by_test_id("rovo-chat-message-group")
     last = groups.last
-    user = last.locator(".ak-renderer-document").first.inner_text().strip()
+    user = plain(last.locator(".ak-renderer-document").first.inner_text())
     answer = "\n".join(last.get_by_test_id("assistant-response-card-layout").locator(".ak-renderer-document").all_inner_texts()).strip()
     return {"turn_count": groups.count(), "turn_sha256": sha256(json.dumps([user, answer]).encode()).hexdigest()}
 
@@ -527,6 +527,8 @@ OBSERVE_TURN = """panel => {
 
 WAIT_TURN = """(panel, {before, prompt, ms, old_ids}) => new Promise((resolve, reject) => {
   const observe = """ + OBSERVE_TURN + """;
+  // Same as state.plain: non-blank lines, spaces collapsed.
+  const plain = text => text.split(/\\r\\n|[\\n\\r]/).map(line => line.trim().split(/\\s+/).join(' ')).filter(Boolean).join('\\n');
   let started = false, timer, observer;
   const finish = (turn, error) => { observer.disconnect(); clearTimeout(timer); error ? reject(error) : resolve(turn); };
   // Same rules as completed_turn, which stays the authoritative check; this only decides when to return.
@@ -535,7 +537,7 @@ WAIT_TURN = """(panel, {before, prompt, ms, old_ids}) => new Promise((resolve, r
     try { turn = observe(panel); } catch (error) { return finish(null, error); }
     started = started || turn.generating || turn.status.trim() === 'Rovo is thinking';
     const fresh = turn.count > before || (turn.last_id && !old_ids.includes(turn.last_id));
-    if (last || (started && fresh && turn.user_text.trim() === prompt
+    if (last || (started && fresh && plain(turn.user_text) === prompt
         && turn.status.trim() === 'Response complete.' && !turn.generating && turn.answer.trim())) {
       finish({...turn, started});
     }
@@ -550,7 +552,7 @@ WAIT_TURN = """(panel, {before, prompt, ms, old_ids}) => new Promise((resolve, r
 def wait_turn(panel, before, prompt, ms, old_ids=()):
     """One consistent read of the completion fields, taken as soon as the page shows a completed
     turn or after ms. "started" reports a start seen at any moment during the wait."""
-    return panel.evaluate(WAIT_TURN, {"before": before, "prompt": prompt.strip(), "ms": ms, "old_ids": list(old_ids)})
+    return panel.evaluate(WAIT_TURN, {"before": before, "prompt": plain(prompt), "ms": ms, "old_ids": list(old_ids)})
 
 
 SEND_URL = (r"/gateway/api/assist/rovo/v1/chat/conversation/"
@@ -775,14 +777,14 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     panel.get_by_role("button", name=attachment["name"][:-4] + " PNG", exact=True).wait_for(state="visible", timeout=30000)
                 if not panel.get_by_role("button", name="Submit", exact=True).is_enabled():
                     raise ValueError("Prompt or attachment is not ready; no prompt sent. Inspect the retained draft.")
-                if textbox.inner_text().strip() != prompt.strip() or not page.url.startswith(allowed_prefixes):
+                if plain(textbox.inner_text()) != plain(prompt) or not page.url.startswith(allowed_prefixes):
                     raise ValueError("Target or draft changed before submission.")
                 if (chat_id and turn_signature(panel) != selected_turn) or (not chat_id and responses.count() != before):
                     raise ValueError("Conversation changed before submission; inspect the retained draft.")
                 # What reconcile needs to prove delivery later: the prompt's hash and Rovo's own turn count
                 # (never the virtualized page's), or None when Rovo's data is missing.
                 record.update(submission_state="attempted_unknown", execution_status="waiting",
-                              prompt_sha256=sha256(prompt.strip().encode()).hexdigest(),
+                              prompt_sha256=sha256(plain(prompt).encode()).hexdigest(),
                               turns_before=server_turns(history, chat_id) if chat_id else 0)
                 save_request(directory, record)
                 with watch_sends(page, origin) as sends:
@@ -806,7 +808,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         started = started or turn["started"] or generating or status.strip() == "Rovo is thinking"
                         if completed_turn(started=started, count=turn["count"], status=status,
                                           generating=generating, answer=answer, before=before,
-                                          prompt_matches=turn["user_text"].strip() == prompt.strip(),
+                                          prompt_matches=plain(turn["user_text"]) == plain(prompt),
                                           new_id=bool(turn.get("last_id")) and turn.get("last_id") not in old_ids):
                             lap("generate")
                             record.update(execution_status="completed", submission_state="observed_submitted")
@@ -815,7 +817,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             warnings = []
                             try:
                                 signature = {"turn_count": turn["group_count"],
-                                             "turn_sha256": sha256(json.dumps([prompt.strip(), answer.strip()]).encode()).hexdigest()}
+                                             "turn_sha256": sha256(json.dumps([plain(prompt), answer.strip()]).encode()).hexdigest()}
                                 if turn_signature(panel) != signature:
                                     raise ValueError("Completed conversation changed before capture")
                                 if not chat_id:
