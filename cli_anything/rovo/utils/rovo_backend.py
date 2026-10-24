@@ -30,6 +30,8 @@ class BrowserConnection:
         self.diagnostics = {}
         self.targets = {}
         self.cleanable = set()
+        # Tabs whose last operation was a successful list or export, which began idle.
+        self.browsed = set()
         # Rovo's own paged history responses per owned tab; see track_history.
         self.history = {}
         # Proof of the chat left open by the last verified ask; consumed by every operation.
@@ -144,12 +146,16 @@ class BrowserConnection:
                 if page.url.startswith((origin + "/jira/", origin + "/browse/")):
                     panel = resolve_panel(page)
                     if panel is not None and panel.get_attribute("data-testid") == "conversation-assistant.ui.conversation-assistant":
-                        require_idle(panel)
-                        empty = (page in self.cleanable
-                                 and panel.get_by_test_id("rovo-chat-message-group").count() == 0
-                                 and panel.get_by_test_id("assistant-response-card-layout").count() == 0)
-                        if ((empty or answered(panel, read_request(state_dir(Path.home(), origin, session))))
-                                and page.url.startswith((origin + "/jira/", origin + "/browse/"))):
+                        if page in self.browsed:
+                            # The picker can hide the composer; only new work since the read-only operation matters.
+                            safe = not busy(panel)
+                        else:
+                            require_idle(panel)
+                            safe = ((page in self.cleanable
+                                     and panel.get_by_test_id("rovo-chat-message-group").count() == 0
+                                     and panel.get_by_test_id("assistant-response-card-layout").count() == 0)
+                                    or answered(panel, read_request(state_dir(Path.home(), origin, session))))
+                        if safe and page.url.startswith((origin + "/jira/", origin + "/browse/")):
                             page.close()
                             continue
                 print("CLI-created tab retained: empty idle state was not verified.", file=sys.stderr)
@@ -260,13 +266,19 @@ def resolve_panel(page):
     return panels[0] if panels else None
 
 
+def busy(panel):
+    """Draft, attachment or active response; an absent composer has no draft."""
+    textbox = panel.get_by_role("textbox")
+    draft = textbox.count() > 1 or (textbox.count() == 1 and textbox.evaluate("""el => { const copy = el.cloneNode(true); copy.querySelectorAll('[data-testid="placeholder-test-id"]').forEach(n => n.remove()); return copy.textContent.trim(); }"""))
+    return bool(panel.get_by_role("button", name="Stop generating", exact=True).is_visible() or draft
+                or panel.get_by_role("button", name=re.compile(r"^Remove file ")).count())
+
+
 def require_idle(panel):
     textbox = panel.get_by_role("textbox")
     if textbox.count() != 1 or not textbox.is_visible() or not textbox.is_enabled():
         raise ValueError("Expected one visible enabled Rovo composer; no prompt sent.")
-    draft = textbox.evaluate("""el => { const copy = el.cloneNode(true); copy.querySelectorAll('[data-testid="placeholder-test-id"]').forEach(n => n.remove()); return copy.textContent.trim(); }""")
-    if (panel.get_by_role("button", name="Stop generating", exact=True).is_visible() or draft
-            or panel.get_by_role("button", name=re.compile(r"^Remove file ")).count()):
+    if busy(panel):
         raise ValueError("Existing draft, attachment or active response; no prompt sent.")
 
 
@@ -549,6 +561,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 page = owner.target(origin, session, account)
                 lap("attach")
                 owner.cleanable.discard(page)
+                owner.browsed.discard(page)
                 panel, opened = prepare_panel(page, origin, account, owner.diagnostics)
                 lap("prepare")
                 base.update(owner.diagnostics, tab_selection="connection_owned", timings_ms=timings)
@@ -589,6 +602,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     if action == "chat_list":
                         scroll_history(rows, False, lambda: list_complete(rows, history) or rows.count() > 100)
                         chats = rows.evaluate_all("""els => els.slice(0,100).map(el => ({id:el.dataset.testid.replace('chat-conversation-list-refresh-row-',''),title:el.getAttribute('aria-label')}))""")
+                        owner.browsed.add(page)
                         return base | {"execution_status": "completed", "chats": chats,
                                        "coverage": "complete" if list_complete(rows, history) else "loaded_only",
                                        "truncated": rows.count() > 100}, 0
@@ -616,6 +630,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                     text = turn[role][:remaining]
                                     messages.append({"role": role, "text": text})
                                     remaining -= len(text)
+                        owner.browsed.add(page)
                         return base | {"execution_status": "completed", "coverage": "complete" if settled() else "loaded_only",
                                        "messages": messages, "truncated": total > 24000,
                                        "attachment_bytes_included": False}, 0

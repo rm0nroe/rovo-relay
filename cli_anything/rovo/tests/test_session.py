@@ -645,3 +645,16 @@ def test_replaced_tab_uses_picker_even_with_matching_message(browser_env):
     assert code == 0 and result["chat_selection"] == "picker", result
     replacement.row.click.assert_called_once()
     replacement.submit.click.assert_called_once()
+
+
+def test_failed_operation_after_a_list_keeps_the_tab(browser_env):
+    env = browser_env
+    env.target.search.is_visible.return_value = True
+    env.target.rows.evaluate_all.side_effect = None
+    env.target.rows.evaluate_all.return_value = []
+    env.target.rows.count.return_value = 0
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, action="chat_list", connection=connection)[1] == 0
+        env.target.textbox.evaluate.return_value = "Leftover draft"
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, connection=connection)[1] == 1
+    env.target.page.close.assert_not_called()
