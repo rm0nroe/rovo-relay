@@ -769,3 +769,39 @@ def test_chat_export_scrolls_up_until_older_turns_end(run_browser, ends):
     assert result["coverage"] == ("complete" if ends else "loaded_only")
     assert result["messages"] == [{"role": "user", "text": "Synthetic question"}, {"role": "assistant", "text": "Synthetic answer"}]
     target.submit.click.assert_not_called()
+
+
+def browsed(action):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.search.is_visible.return_value = True
+    target.rows.evaluate_all.side_effect = None
+    target.rows.evaluate_all.return_value = []
+    target.rows.count.return_value = 0
+    target.groups.evaluate_all.return_value = []
+    kwargs = {"action": action, "chat_id": CHAT} if action == "chat_export" else {"action": action}
+    return target, kwargs
+
+
+@pytest.mark.parametrize("action", ["chat_list", "chat_export"])
+def test_list_and_export_close_their_idle_owned_tab(run_browser, action):
+    target, kwargs = browsed(action)
+    assert run_browser(target, **kwargs)[1] == 0
+    target.page.close.assert_called_once()
+
+
+@pytest.mark.parametrize("action", ["chat_list", "chat_export"])
+@pytest.mark.parametrize("state", ["draft", "attachment", "generating", "error"])
+def test_list_and_export_keep_a_tab_that_holds_work_or_failed(run_browser, action, state):
+    target, kwargs = browsed(action)
+    def later(script):
+        # Work appears after the operation's own idle checks, as if someone used the window meanwhile.
+        if state == "error":
+            raise RuntimeError("Synthetic read failure")
+        {"draft": lambda: setattr(target.textbox.evaluate, "return_value", "Unsent work"),
+         "attachment": lambda: setattr(target.attachments.count, "return_value", 1),
+         "generating": lambda: setattr(target.stop.is_visible, "return_value", True)}[state]()
+        return []
+    (target.groups if action == "chat_export" else target.rows).evaluate_all.side_effect = later
+    result, code = run_browser(target, **kwargs)
+    assert code == (1 if state == "error" else 0), result.get("message")
+    target.page.close.assert_not_called()
