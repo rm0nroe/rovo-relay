@@ -6,7 +6,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from uuid import UUID, uuid4
 from hashlib import sha256
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 import json
 
 from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -30,6 +30,8 @@ class BrowserConnection:
         self.diagnostics = {}
         self.targets = {}
         self.cleanable = set()
+        # Rovo's own paged history responses per owned tab; see track_history.
+        self.history = {}
         # Proof of the chat left open by the last verified ask; consumed by every operation.
         self.warm = None
 
@@ -125,6 +127,7 @@ class BrowserConnection:
                 raise ValueError("Expected one approved Chrome context; cannot safely choose a profile.")
             page = owned_window_page(browser)
             self.targets[key] = page
+            self.history[page] = track_history(page, origin)
             page.set_default_timeout(10000)
             self.diagnostics = {"readiness_phase": "page_navigation"}
             page.goto(origin + "/jira/for-you", wait_until="domcontentloaded", timeout=10000)
@@ -326,6 +329,55 @@ def prepare_panel(page, origin, account, diagnostics):
             page.keyboard.press("Escape")
 
 
+HISTORY_URL = r"/gateway/api/assist/rovo/v1/chat/(?:conversations|conversation/([0-9a-f-]{36})/messages)(?:\?.*)?"
+
+
+def track_history(page, origin):
+    """Rovo's own history responses in this tab, keyed None for the chat list or by chat ID:
+    whether more exists and how many items arrived since the first page."""
+    seen = {}
+    pattern = re.compile(re.escape(origin) + HISTORY_URL)
+
+    def record(response):
+        match = pattern.fullmatch(response.url)
+        if not match or response.request.method != "GET":
+            return
+        key = match.group(1)
+        earlier = seen.get(key, {}).get("items", 0) if "cursor" in parse_qs(urlsplit(response.url).query) else 0
+        try:
+            body = response.json()
+            more, items = body["hasNext"] is not False, len(body["items"])
+        except (PlaywrightError, ValueError, KeyError, TypeError):
+            more, items = True, 0  # Unreadable counts as more history.
+        seen[key] = {"more": more, "items": earlier + items}
+    page.on("response", record)
+    return seen
+
+
+SCROLL_EDGE = """(el, top) => {
+  let box = el;
+  while (box && !(box.scrollHeight > box.clientHeight && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+  if (box) box.scrollTop = top ? 0 : box.scrollHeight;
+}"""
+
+
+def scroll_history(items, top, done, seconds=10):
+    """Scroll Rovo's lazy history toward the top or bottom until done() or time runs out. Never clicks."""
+    deadline = time.monotonic() + seconds
+    while not done():
+        if time.monotonic() >= deadline:
+            return
+        if items.count():
+            (items.first if top else items.last).evaluate(SCROLL_EDGE, top)
+        # Not time.sleep: waiting here also delivers the response events track_history reads.
+        items.page.wait_for_timeout(250)
+
+
+def list_complete(rows, history):
+    state = history.get(None)
+    return bool(state) and not state["more"] and rows.count() == state["items"]
+
+
 def conversation_rows(panel):
     search = panel.get_by_role("searchbox", name="Search conversations...", exact=True)
     if not search.is_visible():
@@ -336,14 +388,13 @@ def conversation_rows(panel):
     search.wait_for(state="visible")
     if search.input_value():
         raise ValueError("Conversation list has a search filter; clear it before continuing.")
-    rows = panel.locator('button[data-testid^="chat-conversation-list-refresh-row-"]')
-    # shortcut: loaded history only; an absent or ambiguous new ID disables continuity.
-    return rows
+    return panel.locator('button[data-testid^="chat-conversation-list-refresh-row-"]')
 
 
-def open_conversation(panel, chat_id):
-    conversation_rows(panel)
+def open_conversation(panel, chat_id, history):
+    rows = conversation_rows(panel)
     row = panel.get_by_test_id("chat-conversation-list-refresh-row-" + str(UUID(chat_id)))
+    scroll_history(rows, False, lambda: row.is_visible() or list_complete(rows, history))
     row.wait_for(state="visible")
     click_control(row, "Conversation row")
     panel.get_by_role("searchbox", name="Search conversations...", exact=True).wait_for(state="hidden")
@@ -527,6 +578,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 idle_checked = True
                 selected_turn = None
                 responses = panel.get_by_test_id("assistant-response-card-layout")
+                history = owner.history.get(page, {})
                 if chat_id and warm_tab(panel, page, warm, prior if automatic else None, opened):
                     base["chat_selection"] = "warm_tab"
                     selected_turn = {key: prior.get(key) for key in ("turn_count", "turn_sha256")}
@@ -535,18 +587,27 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         base["chat_selection"] = "picker"
                     rows = conversation_rows(panel)
                     if action == "chat_list":
-                        rows.first.wait_for(state="visible")
+                        scroll_history(rows, False, lambda: list_complete(rows, history) or rows.count() > 100)
                         chats = rows.evaluate_all("""els => els.slice(0,100).map(el => ({id:el.dataset.testid.replace('chat-conversation-list-refresh-row-',''),title:el.getAttribute('aria-label')}))""")
                         return base | {"execution_status": "completed", "chats": chats,
-                                       "coverage": "loaded_only", "truncated": rows.count() > 100}, 0
-                    open_conversation(panel, chat_id)
+                                       "coverage": "complete" if list_complete(rows, history) else "loaded_only",
+                                       "truncated": rows.count() > 100}, 0
+                    open_conversation(panel, chat_id, history)
                     if automatic:
                         selected_turn = turn_signature(panel)
                         if selected_turn != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
                             base["error_code"] = "conversation_changed"
                             raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
                     if action == "chat_export":
-                        turns = panel.get_by_test_id("rovo-chat-message-group").evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
+                        groups, counts = panel.get_by_test_id("rovo-chat-message-group"), []
+
+                        def settled():
+                            # ponytail: "stable after one 250 ms scroll" is the end-of-render check; lengthen if older turns render slower.
+                            counts.append(groups.count())
+                            state = history.get(str(UUID(chat_id)))
+                            return bool(state) and not state["more"] and len(counts) > 1 and counts[-1] == counts[-2]
+                        scroll_history(groups, True, settled)
+                        turns = groups.evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
                         messages, remaining = [], 24000
                         total = sum(len(turn[role]) for turn in turns for role in ("user", "assistant"))
                         for turn in turns:
@@ -555,7 +616,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                     text = turn[role][:remaining]
                                     messages.append({"role": role, "text": text})
                                     remaining -= len(text)
-                        return base | {"execution_status": "completed", "coverage": "loaded_only",
+                        return base | {"execution_status": "completed", "coverage": "complete" if settled() else "loaded_only",
                                        "messages": messages, "truncated": total > 24000,
                                        "attachment_bytes_included": False}, 0
                 else:

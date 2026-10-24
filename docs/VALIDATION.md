@@ -1,5 +1,20 @@
 # Validation status
 
+## Verified history paging (2026-10-24)
+
+Read-only observation, 0 questions: Rovo's list fetches `GET .../chat/conversations?limit=25`, then prefetches `limit=75` with a cursor, about 100 chats in all. The panel renders only the first 25 rows until it is scrolled. Opening a chat fetches `GET .../chat/conversation/{id}/messages`. Both responses carry `items`, `cursor` and `hasNext`.
+
+The CLI now records those responses from its own tab (listening starts before the page loads) and scrolls the list or the chat until `hasNext` is false. A list is `coverage: "complete"` only when every returned chat is rendered; an export only when the turn count is also stable after a scroll. Anything else stays `loaded_only`. Scrolling stops at 100 listed chats or 10 seconds and never clicks.
+
+Live on the development Mac, through the installed candidate, 0 questions:
+
+| Step | Result |
+|---|---|
+| `chat list` | `coverage: "complete"`, 29 chats (the old code listed the 25 rendered rows) |
+| `chat export --chat` of the oldest chat | Found through the picker below the first 25 rows; `coverage: "complete"`, 2 messages |
+
+The development site has no chat longer than one Rovo page, so loading older turns by scrolling up is covered offline only. Both commands retained their tab, as before: cleanup cannot prove the picker or an exported chat is idle. Offline: 324 passed and 11 opt-in skipped; 335 passed with `ROVO_DOM_CHECK=1`; the installed suite passed 324 with 11 skipped.
+
 ## Verified hidden CLI window (2026-10-24)
 
 The CLI used to open its tab in the user's current Chrome window, which made it the active tab. When the user or another tool switched back, the CLI tab became hidden. Chrome pauses animation frames on hidden pages, and Playwright's click stability check waits for them, so clicks timed out. This is the cause of the startup `Click timed out: Show more` reports, not the capture harness named in an earlier version of this section.
@@ -164,7 +179,7 @@ These checks used incremental installs on one macOS development host. The final 
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, multiple-image live tests, upload error variants, older history pagination, uncertain-delivery reconciliation, actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, older turns of chats longer than one Rovo page, uncertain-delivery reconciliation, actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 
