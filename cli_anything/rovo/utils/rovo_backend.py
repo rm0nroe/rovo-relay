@@ -30,6 +30,8 @@ class BrowserConnection:
         self.diagnostics = {}
         self.targets = {}
         self.cleanable = set()
+        # Proof of the chat left open by the last verified ask; consumed by every operation.
+        self.warm = None
 
     def __enter__(self):
         return self
@@ -232,7 +234,9 @@ def require_idle(panel):
 
 
 def prepare_panel(page, origin, account, diagnostics):
-    """Wait for the bound tab, opening its panel once; never reload or retry a send."""
+    """Wait for the bound tab, opening its panel once; never reload or retry a send.
+
+    Returns (panel, opened); opened means the panel was reopened and may show another chat."""
     deadline = time.monotonic() + 10
     opened = more_opened = authenticated = False
     identity = page.get_by_role("button", name=account, exact=True)
@@ -272,7 +276,7 @@ def prepare_panel(page, origin, account, diagnostics):
                         raise ValueError("Expected one Rovo composer; no prompt sent.")
                     if textbox.count() == 1 and textbox.is_visible():
                         diagnostics["readiness_phase"] = "ready"
-                        return panel
+                        return panel, opened
                 elif not opened:
                     launcher = page.get_by_role("button", name="Ask Rovo", exact=True)
                     if launcher.is_visible() and launcher.is_enabled():
@@ -280,7 +284,7 @@ def prepare_panel(page, origin, account, diagnostics):
                         opened = True
             if time.monotonic() >= deadline:
                 if diagnostics["readiness_phase"] == "account":
-                    return None
+                    return None, opened
                 raise ValueError("Rovo panel/composer did not become ready within 10 seconds; tab retained without refresh or submission.")
             page.wait_for_timeout(100)
     finally:
@@ -322,6 +326,28 @@ def turn_signature(panel):
     return {"turn_count": groups.count(), "turn_sha256": sha256(json.dumps([user, answer]).encode()).hexdigest()}
 
 
+def last_message_id(panel):
+    """Server-assigned UUID of the last message group, or None when absent or ambiguous."""
+    ids = panel.get_by_test_id("rovo-chat-message-group").last.locator("[data-message-id]")
+    try:
+        return str(UUID(ids.get_attribute("data-message-id"))) if ids.count() == 1 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def warm_tab(panel, page, warm, prior, opened):
+    """Reuse the open chat only on proof it is the one just verified; anything else uses the picker."""
+    if (prior is None or warm is None or opened or warm["page"] is not page
+            or warm["request_id"] != prior.get("request_id")
+            or panel.get_by_role("searchbox", name="Search conversations...", exact=True).is_visible()):
+        return False
+    # Count first: turn_signature on zero groups would wait out the locator timeout.
+    count = panel.get_by_test_id("rovo-chat-message-group").count()
+    return (0 < count == prior.get("turn_count")
+            and turn_signature(panel) == {key: prior.get(key) for key in ("turn_count", "turn_sha256")}
+            and last_message_id(panel) == warm["message_id"])
+
+
 OBSERVE_TURN = """panel => {
   const all = (root, selector) => Array.from(root.querySelectorAll(selector));
   const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
@@ -360,6 +386,9 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
     record = {"request_id": str(uuid4()), "site": origin, "account": account, "chat_id": chat_id,
               "submission_state": "not_attempted", "execution_status": "prepared"}
     owner = connection
+    warm = None
+    if connection is not None:
+        warm, connection.warm = connection.warm, None
     started_at = lap_at = time.monotonic()
     timings = {}
 
@@ -395,7 +424,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 page = owner.target(origin, session, account)
                 lap("attach")
                 owner.cleanable.discard(page)
-                panel = prepare_panel(page, origin, account, owner.diagnostics)
+                panel, opened = prepare_panel(page, origin, account, owner.diagnostics)
                 lap("prepare")
                 base.update(owner.diagnostics, tab_selection="connection_owned", timings_ms=timings)
                 if panel is None:
@@ -421,7 +450,11 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 textbox = panel.get_by_role("textbox")
                 require_idle(panel)
                 responses = panel.get_by_test_id("assistant-response-card-layout")
-                if chat_id or action == "chat_list":
+                if chat_id and warm_tab(panel, page, warm, prior if automatic else None, opened):
+                    base["chat_selection"] = "warm_tab"
+                elif chat_id or action == "chat_list":
+                    if chat_id:
+                        base["chat_selection"] = "picker"
                     rows = conversation_rows(panel)
                     if action == "chat_list":
                         rows.first.wait_for(state="visible")
@@ -533,6 +566,9 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             verified = record | signature | {"continuity_status": "verified"}
                             save_request(directory, verified)
                             record = verified
+                            message_id = last_message_id(panel)
+                            if message_id:
+                                owner.warm = {"page": page, "request_id": record["request_id"], "message_id": message_id}
                         except Exception as error:
                             if isinstance(error, ClickError):
                                 base["click_diagnostics"] = error.diagnostics
