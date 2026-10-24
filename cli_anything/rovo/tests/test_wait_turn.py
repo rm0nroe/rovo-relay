@@ -8,6 +8,7 @@ import time
 import pytest
 from playwright.sync_api import Error, sync_playwright
 
+from cli_anything.rovo.core.state import plain
 from cli_anything.rovo.utils.rovo_backend import wait_turn
 
 STATUS = '<div data-testid="chat-history-status-live-region">{}</div>'
@@ -113,6 +114,18 @@ def test_wait_returns_as_soon_as_the_page_completes(page):
     elapsed = time.monotonic() - started_at
     assert turn["started"] and turn["status"] == "Response complete." and turn["answer"] == "Done"
     assert 0.25 < elapsed < 1, elapsed
+
+
+def test_multiline_prompt_returns_as_soon_as_the_page_completes(page):
+    # Rovo renders each prompt line as a paragraph; an empty one for a blank line, a trailing break.
+    prompt = "First paragraph.\n\nSecond, line one.\nSecond, line two."
+    user = "<p>First paragraph.</p><p><br></p><p>Second, line one.</p><p>Second, line two.<br><br></p>"
+    panel = panel_for(page, THINKING.replace("Synthetic prompt", user))
+    assert plain(separate_reads(panel)["user_text"]) == plain(prompt)
+    page.evaluate(FINISH)
+    started_at = time.monotonic()
+    turn = wait_turn(panel, 0, prompt, 5000)
+    assert turn["answer"] == "Done" and time.monotonic() - started_at < 1
 
 
 def test_start_seen_mid_wait_is_reported_after_it_ends(page):
