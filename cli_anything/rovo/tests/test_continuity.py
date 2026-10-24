@@ -258,3 +258,32 @@ def test_saved_row_below_loaded_history_is_scrolled_into_view(run_browser):
     assert code == 0 and result["chat_selection"] == "picker", result
     target.rows.last.evaluate.assert_called_once()
     target.row.click.assert_called_once()
+
+
+def long_chat(tmp_path, saved_turns, server_turns):
+    """A bound chat whose panel shows only its newest turn while Rovo returns every turn."""
+    from test_browser_tabs import history, turns
+    directory = state_dir(tmp_path, ORIGIN, "probe")
+    with site_lock(directory):
+        save_request(directory, read_request(directory) | {"turn_count": saved_turns})
+    target = existing()
+    texts = [text for n in range(server_turns - 1) for text in (f"Q{n}", f"A{n}")] + [PROMPT, "Synthetic answer"]
+    target.row.click.side_effect = lambda **k: history(target, turns(*texts), False, chat=CHAT)
+    return target
+
+
+def test_follow_up_counts_turns_from_rovo_when_the_panel_is_virtualized(run_browser, tmp_path):
+    completed(run_browser)
+    target = long_chat(tmp_path, 10, 10)
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["continuity_status"] == "verified", result.get("message")
+    assert result["turn_count"] == 11
+    target.submit.click.assert_called_once()
+
+
+def test_follow_up_refuses_when_rovo_reports_a_turn_added_elsewhere(run_browser, tmp_path):
+    completed(run_browser)
+    target = long_chat(tmp_path, 10, 11)
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and result["error_code"] == "conversation_changed", result
+    target.submit.click.assert_not_called()

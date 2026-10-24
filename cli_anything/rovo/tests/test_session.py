@@ -677,3 +677,43 @@ def test_ask_after_a_list_in_the_same_session_finds_the_composer(browser_env):
         result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, connection=connection)
     assert code == 0, result.get("message")
     env.target.submit.click.assert_called_once()
+
+
+def test_follow_up_in_the_same_tab_counts_its_own_turns_when_rovo_does_not_refetch(browser_env):
+    from test_browser_tabs import CHAT, history, turns
+    target = browser_env.target
+    target.status.inner_text.side_effect = chain(*[["Rovo is thinking", "Response complete."]] * 2)
+    target.responses.count.return_value = target.groups.count.return_value = 1
+    texts = [text for n in range(9) for text in (f"Q{n}", f"A{n}")] + [PROMPT, "Synthetic answer"]
+    fetched = []
+    # Rovo fetches the chat once per tab; reopening it in the same tab serves its cache.
+    target.row.click.side_effect = lambda **k: fetched or (fetched.append(1), history(target, turns(*texts), False, chat=CHAT))
+    with rovo_backend.BrowserConnection() as connection:
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, chat_id=CHAT, connection=connection)
+        assert code == 0 and result["turn_count"] == 11, result.get("message")
+        target.search.is_visible.return_value = True  # The picker is open, so the open chat cannot prove itself.
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, connection=connection)
+    assert code == 0 and result["continuity_status"] == "verified", result.get("message")
+    assert result["chat_selection"] == "picker" and result["turn_count"] == 12
+
+
+def test_a_new_chat_seeds_the_tab_record_with_its_first_turn(browser_env):
+    from test_browser_tabs import CHAT
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, new=True, connection=connection)[1] == 0
+        assert rovo_backend.server_turns(connection.history[browser_env.target.page], CHAT) == 1
+
+
+def test_long_chat_follow_up_reuses_the_open_tab_and_exit_closes_it(browser_env):
+    from test_browser_tabs import CHAT, history, turns
+    target = browser_env.target
+    target.status.inner_text.side_effect = chain(*[["Rovo is thinking", "Response complete."]] * 2)
+    target.responses.count.return_value = target.groups.count.return_value = 1
+    texts = [text for n in range(9) for text in (f"Q{n}", f"A{n}")] + [PROMPT, "Synthetic answer"]
+    target.row.click.side_effect = lambda **k: history(target, turns(*texts), False, chat=CHAT)
+    with rovo_backend.BrowserConnection() as connection:
+        assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, chat_id=CHAT, connection=connection)[1] == 0
+        # The virtualized page shows 2 of the chat's 11 turns.
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, connection=connection)
+        assert code == 0 and result["chat_selection"] == "warm_tab" and result["turn_count"] == 12, result.get("message")
+    target.page.close.assert_called_once()
