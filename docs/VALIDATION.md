@@ -1,6 +1,29 @@
 # Validation status
 
-## Current development baseline (2026-10-23)
+## Verified follow-up speed (2026-10-24)
+
+Implementation `14c9cc7`, included in published `main` at `dff7cff`, passed the live comparison below through the installed CLI in normal Chrome. Both source and installed-wheel suites passed **302 tests**, with **8 opt-in local-browser checks skipped** in each. The wheel used the declared isolated build requirements, and all 15 packaged files matched source byte for byte.
+
+| Phase | Normal picker | Verified open-chat shortcut | Difference |
+|---|---:|---:|---:|
+| Attach | 3 ms | 3 ms | 0 ms |
+| Prepare | 171 ms | 196 ms | +25 ms |
+| Select | 1,240 ms | 33 ms | -1,207 ms |
+| Generate | 7,643 ms | 7,222 ms | -421 ms |
+| Capture | 11 ms | 14 ms | +3 ms |
+| Total | 9,068 ms | 7,468 ms | -1,600 ms |
+
+The shortcut reduced chat-selection time by **97.3%** in this comparison. Total time was **17.6%** lower, but the 421 ms difference in Rovo generation is not attributable to skipping the picker. These are two consecutive observations, not an average or a guarantee for other requests.
+
+Exactly two questions were sent, once each, in one retained connection. The first continued an existing synthetic chat through the picker; the immediate follow-up returned `chat_selection: warm_tab`. Both completed with verified continuity and the same observed conversation ID. Turn count increased by one for each answer; a read-only export confirmed the original history was unchanged and exactly two turns were added. Native Chrome showed the expected answers and an empty composer. No submission was retried.
+
+The successful shortcut confirms that the message ID captured after the first answer still matched at the follow-up check. Longer-term stability, other layouts and invocation from Copilot remain unverified. Synthetic response completion does not establish grounded retrieval or the absence of provider-side effects.
+
+The CLI exited normally, only the test-created tab was closed, and all original tabs remained intact. Private prompts, logs, identifiers and screenshots remain outside the repository. No account details or machine-specific paths are included here.
+
+<a id="current-development-baseline-2026-10-23"></a>
+
+## Earlier development baseline (2026-10-23)
 
 Source `7de0fbc`, package version `0.1.0a6`, passed **249 offline tests** against the installed command outside the checkout, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the venv executable directory on PATH. The installed backend matched source byte-for-byte and `git diff --check` passed. An initial invocation had 10 subprocess failures because PATH omitted the CLI; the corrected invocation passed all tests. A normal isolated `pip install --no-deps .` build succeeded with the declared build requirements; the older offline fallback described below is historical.
 
