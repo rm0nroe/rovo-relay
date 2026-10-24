@@ -2,7 +2,7 @@
 
 ## Verified follow-up speed (2026-10-24)
 
-Implementation `14c9cc7`, included in published `main` at `dff7cff`, passed the live comparison below through the installed CLI in normal Chrome. Both source and installed-wheel suites passed **302 tests**, with **8 opt-in local-browser checks skipped** in each. The wheel used the declared isolated build requirements, and all 15 packaged files matched source byte for byte.
+Implementation `125d940`, included in published `main` at `34ffca7`, passed the live comparison below through the installed CLI in normal Chrome. Both source and installed-wheel suites passed **302 tests**, with **8 opt-in local-browser checks skipped** in each. The wheel used the declared isolated build requirements, and all 15 packaged files matched source byte for byte.
 
 | Phase | Normal picker | Verified open-chat shortcut | Difference |
 |---|---:|---:|---:|
@@ -25,9 +25,9 @@ The CLI exited normally, only the test-created tab was closed, and all original 
 
 ## Earlier development baseline (2026-10-23)
 
-Source `7de0fbc`, package version `0.1.0a6`, passed **249 offline tests** against the installed command outside the checkout, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the venv executable directory on PATH. The installed backend matched source byte-for-byte and `git diff --check` passed. An initial invocation had 10 subprocess failures because PATH omitted the CLI; the corrected invocation passed all tests. A normal isolated `pip install --no-deps .` build succeeded with the declared build requirements; the older offline fallback described below is historical.
+Source `41ca8de`, package version `0.1.0a6`, passed **249 offline tests** against the installed command outside the checkout, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the venv executable directory on PATH. The installed backend matched source byte-for-byte and `git diff --check` passed. An initial invocation had 10 subprocess failures because PATH omitted the CLI; the corrected invocation passed all tests. A normal isolated `pip install --no-deps .` build succeeded with the declared build requirements; the older offline fallback described below is historical.
 
-The following live scenarios passed on `c9f380a` in normal signed-in Chrome. They used three separately authorized questions in total, with no submission retries; read-only exports and saved records supplied the verification:
+The following live scenarios passed on `7c5f895` in normal signed-in Chrome. They used three separately authorized questions in total, with no submission retries; read-only exports and saved records supplied the verification:
 
 | Scenario | Additional questions | Verified result |
 |---|---|---|
@@ -35,15 +35,15 @@ The following live scenarios passed on `c9f380a` in normal signed-in Chrome. The
 | Existing conversation to `ask --new` | 1 | Enabled New chat path; distinct new ID with one turn; original conversation unchanged |
 | Second turn after CLI restart and owned-tab closure | 1 | Plain `ask` with no `--chat` or `--new` reused the saved ID; two turns with the first unchanged; reply used the prior token without repeating it in the follow-up prompt |
 
-The restart test first encountered a pre-submit startup failure, `Ask Rovo (detached)`. After user-approved restart and window expansion, continuity passed. Subsequent read-only investigation reproduced the narrow-window failure: account verification dismissed Show more before clicking the launcher inside it. Commit `7de0fbc` removes that premature dismissal while retaining final menu cleanup and all identity/delivery checks. Its regression failed before the fix; fresh installed startup and another status then passed at the narrow layout without resizing. **No questions were sent after this readiness fix.**
+The restart test first encountered a pre-submit startup failure, `Ask Rovo (detached)`. After user-approved restart and window expansion, continuity passed. Subsequent read-only investigation reproduced the narrow-window failure: account verification dismissed Show more before clicking the launcher inside it. Commit `41ca8de` removes that premature dismissal while retaining final menu cleanup and all identity/delivery checks. Its regression failed before the fix; fresh installed startup and another status then passed at the narrow layout without resizing. **No questions were sent after this readiness fix.**
 
-Commit `c9f380a` added private-safe `click_diagnostics` with a fixed control label, allowlisted reason and timeout flag. The reproduced startup failure verified those diagnostics live. The earlier post-readiness pre-submit timeout still lacks its original detailed call log and remains unidentified; it must not be attributed to this startup bug. No automatic click or submission retry was added.
+Commit `7c5f895` added private-safe `click_diagnostics` with a fixed control label, allowlisted reason and timeout flag. The reproduced startup failure verified those diagnostics live. The earlier post-readiness pre-submit timeout still lacks its original detailed call log and remains unidentified; it must not be attributed to this startup bug. No automatic click or submission retry was added.
 
 Task-owned diagnostic processes, tabs and build scaffolding were removed; synthetic conversations and request evidence remain private outside Git. These results accept the measured local paths only. Copilot acceptance, grounded retrieval and mini-modal sends remain open. See [the testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure. Earlier sections below retain their candidate-specific historical counts and limits.
 
 ## Automatic conversation continuity (2026-10-23)
 
-Commit `0445e91` adds automatic conversation binding for the same site/session/account, explicit `--new`, verified capture from loaded picker IDs and history checks before follow-up. The final installed candidate passed 205 offline tests outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`; all 12 installed files and three documentation mirror pairs matched source. Use the [development testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure.
+Commit `bcb1554` adds automatic conversation binding for the same site/session/account, explicit `--new`, verified capture from loaded picker IDs and history checks before follow-up. The final installed candidate passed 205 offline tests outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`; all 12 installed files and three documentation mirror pairs matched source. Use the [development testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure.
 
 Three authorized synthetic turns completed in the owner's normal signed-in Chrome with the same captured conversation ID and visible turn counts of one, two and three. No follow-up supplied `--chat`. The second turn reused the foreground connection; the third used a fresh installed process and reopened the saved chat. The final pre-submit history and persistence refinements were verified offline after these live requests, not by another live submission. The exact pinned isolated build remained unavailable; the wheel used existing setuptools 84.0.0 and wheel 0.48.0.
 
