@@ -13,7 +13,7 @@ from playwright.sync_api import Error as PlaywrightError, TimeoutError as Playwr
 from cli_anything.rovo.utils.chrome_approval import ApprovalError, ChromeApproval
 
 from cli_anything.rovo.core.state import (
-    blocking_request, bounded_answer, completed_turn, read_request, save_request, site_lock, state_dir, unresolved,
+    blocking_request, bounded_answer, completed_turn, delivered, provable, read_request, save_request, site_lock, state_dir, unresolved,
 )
 
 
@@ -599,10 +599,24 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
     try:
         with site_lock(directory):
             prior = read_request(directory)
-            blocked = blocking_request(directory)
+
+            def refused(reason):
+                return base | prior | {"execution_status": "blocked", "retry_safe": False, "reconcilable": False, "reconcile_reason": reason,
+                                       "message": "Delivery is still unproven; the block stays. Inspect that conversation; do not resubmit or switch sessions."}, 4
+            if action == "reconcile":
+                # Reconcile only reads Rovo, so it runs past the block it exists to resolve, and only on this session's record.
+                if not unresolved(prior):
+                    return base | {"execution_status": "error", "error_code": "reconcile_not_needed", "retry_safe": False,
+                                   "message": "This session has no uncertain delivery to reconcile."}, 1
+                if not provable(prior):
+                    return refused("record_unprovable")
+                record, chat_id = prior, prior["chat_id"]
+            blocked = action != "reconcile" and blocking_request(directory)
             if blocked:
-                return base | blocked | {"execution_status": "blocked", "retry_safe": False,
-                                      "message": "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions."}, 4
+                own = blocked.get("request_id") == (prior or {}).get("request_id") and provable(blocked)
+                return base | blocked | {"execution_status": "blocked", "retry_safe": False, "reconcilable": own,
+                                      "message": ("Prior delivery remains unresolved. Run reconcile for this session; never resubmit." if own else
+                                                  "Prior delivery remains unresolved. Inspect that conversation; do not resubmit or switch sessions.")}, 4
             automatic = prompt is not None and not new and chat_id is None and prior is not None
             if new and chat_id:
                 raise ValueError("Use either --new or --chat, not both.")
@@ -626,7 +640,8 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 lap("prepare")
                 base.update(owner.diagnostics, tab_selection="connection_owned", timings_ms=timings)
                 if panel is None:
-                    return base | record | {"execution_status": "authentication_required", "retry_safe": True}, 2
+                    return base | record | {"execution_status": "authentication_required",
+                                            "retry_safe": record["submission_state"] == "not_attempted"}, 2
                 if panel.get_attribute("data-testid") == "conversation-assistant-mini-modal-main-container":
                     # shortcut: status only until mini-modal generation and completion are verified.
                     if prompt is None and action == "status":
@@ -681,6 +696,18 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         if counted != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
                             base["error_code"] = "conversation_changed"
                             raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
+                    if action == "reconcile":
+                        state = history.get(str(UUID(chat_id))) or {}
+                        reply, reason = ((None, "history_incomplete") if state.get("messages") is None or state["more"] else
+                                         delivered(state["messages"], prior["prompt_sha256"], prior["turns_before"]))
+                        owner.browsed.add(page)
+                        if reply is None:
+                            return refused(reason)
+                        record = prior | {"execution_status": "completed", "submission_state": "observed_submitted",
+                                          "continuity_status": "unavailable",
+                                          "reconciled": {"evidence": "rovo_messages", "message_id": reply["id"], "original": prior}}
+                        save_request(directory, record)
+                        return base | record | bounded_answer(reply["text"]) | {"retry_safe": False}, 0
                     if action == "chat_export":
                         state = history.get(str(UUID(chat_id))) or {}
                         if state.get("messages") is not None:
@@ -752,7 +779,11 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Target or draft changed before submission.")
                 if (chat_id and turn_signature(panel) != selected_turn) or (not chat_id and responses.count() != before):
                     raise ValueError("Conversation changed before submission; inspect the retained draft.")
-                record.update(submission_state="attempted_unknown", execution_status="waiting")
+                # What reconcile needs to prove delivery later: the prompt's hash and Rovo's own turn count
+                # (never the virtualized page's), or None when Rovo's data is missing.
+                record.update(submission_state="attempted_unknown", execution_status="waiting",
+                              prompt_sha256=sha256(prompt.strip().encode()).hexdigest(),
+                              turns_before=server_turns(history, chat_id) if chat_id else 0)
                 save_request(directory, record)
                 with watch_sends(page, origin) as sends:
                     click_control(panel.get_by_role("button", name="Submit", exact=True), "Submit")
@@ -808,6 +839,9 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                 "retry_safe": False, "image_count": len(images), "elapsed_ms": round((time.monotonic()-started_at)*1000),
                                 "warnings": warnings}, 0
                     record["execution_status"] = "timeout"
+                    if not chat_id and len(sends) == 1:
+                        # The one send from this tab names the new chat, so reconcile can find it.
+                        record["chat_id"] = sends[0]
                     save_request(directory, record)
                     return base | record | {"partial_answer": answer[:12000], "retry_safe": False}, 3
     except (Exception, KeyboardInterrupt) as error:

@@ -1,6 +1,10 @@
 # Connection and setup troubleshooting
 
-Read when a result has `next: stop` for a connection, setup or layout error, or when preparing Chrome. SKILL.md's authority limits still apply. `doctor` reports the installed runtime; do not claim authentication from it.
+Read when a result has `next: reconcile`, or `next: stop` for a connection, setup or layout error, or when preparing Chrome. SKILL.md's authority limits still apply. `doctor` reports the installed runtime; do not claim authentication from it.
+
+## Uncertain delivery
+
+`next: reconcile` means this session's last ask may have reached Rovo; never resend it. The session exits on that result. Run once, with the same global options (`--chrome-port`, `--approve-chrome-prompt`): `rovo-relay-cli --site SITE --session SESSION --account EMAIL reconcile`. Act on its `next`, then start a new session. It reads Rovo's history for the recorded chat and lifts the block only on proof: the prompt exactly once after the earlier turns, then a non-empty answer. If it returns `next: stop` with `reconcile_reason`, the block stays: `answer_missing` can mean Rovo is still answering (try once more later), while `prompt_missing`, `prompt_duplicated`, `history_incomplete` and `record_unprovable` need the user to inspect that chat. Never edit or delete the record to get past it.
 
 ## Chrome attachment
 

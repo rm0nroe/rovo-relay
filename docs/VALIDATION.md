@@ -1,5 +1,21 @@
 # Validation status
 
+## Verified guarded reconcile (2026-10-24)
+
+An uncertain attempt (`attempted_unknown`) blocks every send on the site, and until now only a manual record edit could lift it. `reconcile` is the guarded way out. It never sends. Before Submit, an ask now saves the prompt's SHA-256 and the chat's turn count from Rovo's own data (`turns_before`; never the virtualized page's count, so it is null when that data is missing). A new chat that times out also saves the chat ID named by its one observed send. `reconcile` opens that chat in its own tab, reads Rovo's `messages` data and lifts the block only if the history is complete, the prompt hash matches exactly one human turn after `turns_before`, and a non-empty answer follows. A prompt asked earlier in the same chat therefore cannot pass for this attempt. On success the record becomes `completed` / `observed_submitted` / `continuity_status: unavailable` and keeps the original under `reconciled.original`. Anything else changes nothing and reports `reconcile_reason`. A blocked result says `reconcilable: true` and `next: reconcile` only for this session's own provable record.
+
+Live, installed candidate, 1 question:
+
+| Step | Result |
+|---|---|
+| `reconcile` on a session with a completed record | Exit 1, `reconcile_not_needed`, no Chrome attachment |
+| New-chat ask with `--timeout 1` | Exit 3 `timeout`; record kept the chat ID from the send, the prompt hash and `turns_before: 0` |
+| `status` on that session | Exit 4 `blocked`, `reconcilable: true`, `next: reconcile` |
+| `reconcile` | Exit 0; Rovo's data proved delivery; the answer returned; record completed with the original kept; `next: new_or_inspect` |
+| `status` again | Exit 0, no block. The window left by the timed-out ask was closed; the reconcile and status tabs closed themselves |
+
+Offline: 372 passed and 13 opt-in skipped; 385 passed with `ROVO_DOM_CHECK=1`; installed 372 with 13 skipped. Unverified live: reconciling a continued-chat attempt (offline-tested) and multi-paragraph prompts, whose text Rovo stores as ADF blocks; a mismatch fails closed as `prompt_missing`. Not reconcilable by design: records written before this change, MCP reservations, a new chat whose send was not seen exactly once (for example an error after Submit), and another session's record.
+
 ## Verified long chats (2026-10-24)
 
 A synthetic chat was built to 30 turns, 30 Rovo questions in all. Findings:
@@ -219,7 +235,7 @@ These checks used incremental installs on one macOS development host. The final 
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (over 60 messages), uncertain-delivery reconciliation, actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (over 60 messages), live reconcile of a continued-chat attempt, actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 
