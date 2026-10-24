@@ -237,7 +237,7 @@ These checks used incremental installs on one macOS development host. The final 
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (over 60 messages),  actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (over 60 messages), actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 
