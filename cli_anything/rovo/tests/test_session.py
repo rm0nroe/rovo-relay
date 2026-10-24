@@ -389,7 +389,10 @@ def test_mini_modal_stream_never_sends_or_lists(browser_env, monkeypatch, capsys
 def test_timeout_ends_stream_without_resubmission(browser_env, monkeypatch, capsys, tmp_path):
     clock = SimpleNamespace(now=0)
     monkeypatch.setattr(rovo_backend.time, "monotonic", lambda: clock.now)
-    browser_env.target.page.wait_for_timeout.side_effect = lambda _: setattr(clock, "now", clock.now + 2)
+    snapshot = browser_env.target.panel.evaluate.side_effect
+    # Each in-page wait slice uses up fake time, as a real slice would.
+    browser_env.target.panel.evaluate.side_effect = lambda script, arg=None: (
+        setattr(clock, "now", clock.now + 2), snapshot(script, arg))[1]
     browser_env.target.status.inner_text.side_effect = None
     browser_env.target.status.inner_text.return_value = "Rovo is thinking"
     prompt = tmp_path / "prompt.txt"

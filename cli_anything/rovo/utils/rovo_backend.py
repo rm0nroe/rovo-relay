@@ -369,9 +369,31 @@ OBSERVE_TURN = """panel => {
 }"""
 
 
-def observe_turn(panel):
-    """One consistent read of the completion fields; a missing status region reads as not complete."""
-    return panel.evaluate(OBSERVE_TURN)
+WAIT_TURN = """(panel, {before, prompt, ms}) => new Promise((resolve, reject) => {
+  const observe = """ + OBSERVE_TURN + """;
+  let started = false, timer, observer;
+  const finish = (turn, error) => { observer.disconnect(); clearTimeout(timer); error ? reject(error) : resolve(turn); };
+  // Same rules as completed_turn, which stays the authoritative check; this only decides when to return.
+  const check = last => {
+    let turn;
+    try { turn = observe(panel); } catch (error) { return finish(null, error); }
+    started = started || turn.generating || turn.status.trim() === 'Rovo is thinking';
+    if (last || (started && turn.count > before && turn.user_text.trim() === prompt
+        && turn.status.trim() === 'Response complete.' && !turn.generating && turn.answer.trim())) {
+      finish({...turn, started});
+    }
+  };
+  observer = new MutationObserver(() => check(false));
+  observer.observe(panel, {subtree: true, childList: true, characterData: true, attributes: true});
+  timer = setTimeout(() => check(true), ms);
+  check(false);
+})"""
+
+
+def wait_turn(panel, before, prompt, ms):
+    """One consistent read of the completion fields, taken as soon as the page shows a completed
+    turn or after ms. "started" reports a start seen at any moment during the wait."""
+    return panel.evaluate(WAIT_TURN, {"before": before, "prompt": prompt.strip(), "ms": ms})
 
 
 SEND_URL = (r"/gateway/api/assist/rovo/v1/chat/conversation/"
@@ -550,9 +572,16 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     while time.monotonic() < deadline:
                         if not page.url.startswith(allowed_prefixes):
                             raise ValueError("Browser left the expected site after submission.")
-                        turn = observe_turn(panel)
+                        # ponytail: site-left and deadline are noticed once per slice (up to 1 s), not every 200 ms;
+                        # a navigation rejects the wait at once. Shorten the slice if that lag matters.
+                        try:
+                            turn = wait_turn(panel, before, prompt, round(min(1, deadline - time.monotonic()) * 1000))
+                        except PlaywrightError:
+                            if not page.url.startswith(allowed_prefixes):
+                                raise ValueError("Browser left the expected site after submission.")
+                            raise
                         status, generating, answer = turn["status"], turn["generating"], turn["answer"]
-                        started = started or generating or status.strip() == "Rovo is thinking"
+                        started = started or turn["started"] or generating or status.strip() == "Rovo is thinking"
                         if completed_turn(started=started, count=turn["count"], status=status,
                                           generating=generating, answer=answer, before=before,
                                           prompt_matches=turn["user_text"].strip() == prompt.strip()):
@@ -583,7 +612,6 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             return base | record | bounded_answer(answer) | {
                                 "retry_safe": False, "image_count": len(images), "elapsed_ms": round((time.monotonic()-started_at)*1000),
                                 "warnings": warnings}, 0
-                        page.wait_for_timeout(200)
                     record["execution_status"] = "timeout"
                     save_request(directory, record)
                     return base | record | {"partial_answer": answer[:12000], "retry_safe": False}, 3
