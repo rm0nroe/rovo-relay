@@ -8,7 +8,7 @@ This is an experimental, unofficial client. See the validation notes before live
 
 - New-chat text questions with optional PNG images and GitHub chat source selection.
 - Follow-up questions using an observed conversation ID.
-- Loaded conversation listing and bounded text exports.
+- Conversation listing (up to 100 chats) and bounded text exports, each reporting whether history is complete.
 - Exact site/account checks, draft preservation and conservative uncertain-delivery handling.
 - Installable command, persistent foreground JSON-lines session, interactive REPL and an on-demand Copilot skill.
 - Agent-mediated MCP fallback with durable local delivery guards (offline-tested; live acceptance pending).
@@ -105,7 +105,7 @@ chat export --chat CONVERSATION_UUID
 ask --chat CONVERSATION_UUID --prompt-file follow-up.txt
 ```
 
-Copy an ID from `chat list`; do not guess it. Listing and export cover currently loaded history only. Export contains user/assistant text, not original image bytes, intermediate progress or hidden model context. A new chat's ID is read from the single Rovo send request the owned tab makes after Submit, and accepted only when the completed turn in that tab still matches. Results report `conversation_mode`, `chat_id` and `continuity_status`. A verified binding stores the last turn's hash and loaded turn count in the existing private request record, not prompt/answer text. A missing, ambiguous, legacy or wrong-account binding, or changed loaded history, blocks implicit follow-up. Inspect before explicitly selecting a chat; use `--new` only for a genuinely separate task. Capture failure preserves the completed answer with a warning and `continuity_status: unavailable`; never resend it. `--new` cannot bypass unresolved delivery. Automatic continuity applies only to direct CLI mode; structured citation extraction remains unimplemented.
+Copy an ID from `chat list`; do not guess it. Listing and export scroll Rovo's own history, for up to 10 seconds, until Rovo reports there is no more: `coverage: "complete"` means Rovo said so and everything it returned is shown, otherwise `coverage: "loaded_only"`. `truncated: true` means the output was cut (more than 100 chats, or an export over 24,000 characters). A saved chat below the first loaded rows is scrolled into view before it is selected. Export contains user/assistant text, not original image bytes, intermediate progress or hidden model context. A new chat's ID is read from the single Rovo send request the owned tab makes after Submit, and accepted only when the completed turn in that tab still matches. Results report `conversation_mode`, `chat_id` and `continuity_status`. A verified binding stores the last turn's hash and loaded turn count in the existing private request record, not prompt/answer text. A missing, ambiguous, legacy or wrong-account binding, or changed loaded history, blocks implicit follow-up. Inspect before explicitly selecting a chat; use `--new` only for a genuinely separate task. Capture failure preserves the completed answer with a warning and `continuity_status: unavailable`; never resend it. `--new` cannot bypass unresolved delivery. Automatic continuity applies only to direct CLI mode; structured citation extraction remains unimplemented.
 
 ## Output and recovery
 

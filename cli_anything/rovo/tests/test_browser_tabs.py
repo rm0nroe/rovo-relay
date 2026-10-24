@@ -693,3 +693,79 @@ def test_cleanup_rechecks_origin_after_pending_navigation_events(run_browser):
     target.groups.count.side_effect = deliver_navigation
     assert run_browser(target)[1] == 0
     target.page.close.assert_not_called()
+
+
+CHAT = "12345678-1234-4234-8234-123456789abc"
+
+
+def history(target, items, more, *, chat=None, cursor=False):
+    """Deliver one of Rovo's own paged history responses (list, or one chat's messages) to the tab."""
+    path = f"conversation/{chat}/messages" if chat else "conversations?limit=25"
+    url = f"{ORIGIN}/gateway/api/assist/rovo/v1/chat/{path}" + (("&" if "?" in path else "?") + "cursor=synthetic" if cursor else "")
+    response = SimpleNamespace(url=url, request=SimpleNamespace(method="GET"),
+                               json=lambda: {"items": [{}] * items, "cursor": "synthetic" if more else None, "hasNext": more})
+    for handler in list(target.listeners.get("response", [])):
+        handler(response)
+
+
+def test_chat_list_scrolls_until_rovo_reports_the_end(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.search.is_visible.return_value = True
+    target.rows.count.return_value = 25
+    target.rows.evaluate_all.side_effect = None
+    target.rows.evaluate_all.return_value = [{"id": CHAT, "title": "Synthetic"}]
+    target.page.goto.side_effect = lambda *a, **k: history(target, 25, True)
+
+    def scroll(script, top):
+        assert top is False
+        history(target, 4, False, cursor=True)
+        target.rows.count.return_value = 29
+    target.rows.last.evaluate.side_effect = scroll
+    result, code = run_browser(target, action="chat_list")
+    assert code == 0, result
+    assert result["coverage"] == "complete" and result["truncated"] is False
+    target.rows.last.evaluate.assert_called_once()
+    target.submit.click.assert_not_called()
+
+
+@pytest.mark.parametrize("seen", ["none", "more", "unrendered"])
+def test_chat_list_without_proof_of_the_end_stays_loaded_only(run_browser, seen):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.search.is_visible.return_value = True
+    target.rows.count.return_value = 25
+    target.rows.evaluate_all.side_effect = None
+    target.rows.evaluate_all.return_value = []
+    if seen != "none":
+        target.page.goto.side_effect = lambda *a, **k: history(target, 29, seen == "more")
+    result, code = run_browser(target, action="chat_list")
+    assert code == 0 and result["coverage"] == "loaded_only" and result["truncated"] is False, result
+
+
+def test_chat_list_stops_scrolling_past_the_output_cap(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.search.is_visible.return_value = True
+    target.rows.count.return_value = 101
+    target.rows.evaluate_all.side_effect = None
+    target.rows.evaluate_all.return_value = []
+    target.page.goto.side_effect = lambda *a, **k: history(target, 101, True)
+    result, code = run_browser(target, action="chat_list")
+    assert code == 0 and result["truncated"] is True and result["coverage"] == "loaded_only", result
+    target.rows.last.evaluate.assert_not_called()
+
+
+@pytest.mark.parametrize("ends", [True, False])
+def test_chat_export_scrolls_up_until_older_turns_end(run_browser, ends):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.groups.evaluate_all.return_value = [{"user": "Synthetic question", "assistant": "Synthetic answer"}]
+    target.row.click.side_effect = lambda **k: history(target, 2, True, chat=CHAT)
+
+    def scroll(script, top):
+        assert top is True
+        history(target, 4, not ends, chat=CHAT, cursor=True)
+        target.groups.count.return_value = 3
+    target.groups.first.evaluate.side_effect = scroll
+    result, code = run_browser(target, action="chat_export", chat_id=CHAT)
+    assert code == 0, result
+    assert result["coverage"] == ("complete" if ends else "loaded_only")
+    assert result["messages"] == [{"role": "user", "text": "Synthetic question"}, {"role": "assistant", "text": "Synthetic answer"}]
+    target.submit.click.assert_not_called()

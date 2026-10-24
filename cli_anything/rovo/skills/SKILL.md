@@ -25,7 +25,7 @@ Requires `rovo-relay-cli` 0.1.0a6+, schema 1, and the user's site, session and e
 One JSON argv array per line; read its one result before the next.
 
 - `["ask", "--prompt-file", "PATH"]`: question in a private UTF-8 file, never shell-interpolated or `-`. First ask creates a chat; later asks continue it, even after restart. `--new` starts another task; `--chat UUID` selects an observed chat. Optional `--image PATH.png` (approved, max 4 x 5 MiB), `--github-source on|off` (chat filter only).
-- `["status"]`, `["chat", "list"]`, `["chat", "export", "--chat", "UUID"]` (loaded text, 24,000-character cap).
+- `["status"]`, `["chat", "list"]`, `["chat", "export", "--chat", "UUID"]` (text, 24,000-character cap; check `coverage`).
 
 Close stdin when done; wait for exit.
 
