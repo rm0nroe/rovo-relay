@@ -2,7 +2,7 @@
 import time
 import re
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from uuid import UUID, uuid4
 from hashlib import sha256
@@ -374,9 +374,27 @@ def observe_turn(panel):
     return panel.evaluate(OBSERVE_TURN)
 
 
-def observed_ids(rows):
-    ids = rows.evaluate_all("els => els.map(el => el.dataset.testid.replace('chat-conversation-list-refresh-row-', ''))")
-    return {str(UUID(value)) for value in ids}
+SEND_URL = (r"/gateway/api/assist/rovo/v1/chat/conversation/"
+            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/message/stream(?:/sse)?")
+
+
+@contextmanager
+def watch_sends(page, origin):
+    """Conversation IDs named by this tab's Rovo send requests while the block runs.
+
+    The send request streams the answer and never finishes, so read it as it starts."""
+    sends = []
+    pattern = re.compile(re.escape(origin) + SEND_URL)
+
+    def record(request):
+        match = pattern.fullmatch(request.url)
+        if request.method == "POST" and match:
+            sends.append(match.group(1))
+    page.on("request", record)
+    try:
+        yield sends
+    finally:
+        page.remove_listener("request", record)
 
 
 def operate(origin, session, account, prompt=None, timeout=180, images=(), github_source=None,
@@ -490,12 +508,6 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                 or responses.count() != 0 or panel.get_by_test_id("rovo-chat-message-group").count() != 0
                                 or not submit.is_visible() or submit.is_enabled()):
                             raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
-                if prompt is not None and not chat_id:
-                    old_ids = observed_ids(conversation_rows(panel))
-                    click_control(panel.get_by_role("button", name="Go back to Rovo chat", exact=True), "Go back to Rovo chat")
-                    textbox.wait_for(state="visible")
-                    if responses.count() or panel.get_by_test_id("rovo-chat-message-group").count():
-                        raise ValueError("Expected empty new chat after conversation discovery; no prompt sent.")
                 lap("select")
                 before = responses.count()
                 selected_turn = turn_signature(panel) if chat_id else None
@@ -529,58 +541,52 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Conversation changed before submission; inspect the retained draft.")
                 record.update(submission_state="attempted_unknown", execution_status="waiting")
                 save_request(directory, record)
-                click_control(panel.get_by_role("button", name="Submit", exact=True), "Submit")
-                # A successful click is not a server acknowledgement; remain conservative.
-                deadline = time.monotonic() + timeout
-                started = False
-                answer = ""
-                while time.monotonic() < deadline:
-                    if not page.url.startswith(allowed_prefixes):
-                        raise ValueError("Browser left the expected site after submission.")
-                    turn = observe_turn(panel)
-                    status, generating, answer = turn["status"], turn["generating"], turn["answer"]
-                    started = started or generating or status.strip() == "Rovo is thinking"
-                    if completed_turn(started=started, count=turn["count"], status=status,
-                                      generating=generating, answer=answer, before=before,
-                                      prompt_matches=turn["user_text"].strip() == prompt.strip()):
-                        lap("generate")
-                        record.update(execution_status="completed", submission_state="observed_submitted")
-                        record["continuity_status"] = "unavailable"
-                        save_request(directory, record)
-                        warnings = []
-                        try:
-                            signature = {"turn_count": turn["group_count"],
-                                         "turn_sha256": sha256(json.dumps([prompt.strip(), answer.strip()]).encode()).hexdigest()}
-                            if turn_signature(panel) != signature:
-                                raise ValueError("Completed conversation changed before capture")
-                            if not chat_id:
-                                require_idle(panel)
-                                new_ids = observed_ids(conversation_rows(panel)) - old_ids
-                                if len(new_ids) != 1:
-                                    raise ValueError("New conversation ID is missing or ambiguous")
-                                captured_id = new_ids.pop()
-                                open_conversation(panel, captured_id)
+                with watch_sends(page, origin) as sends:
+                    click_control(panel.get_by_role("button", name="Submit", exact=True), "Submit")
+                    # A successful click is not a server acknowledgement; remain conservative.
+                    deadline = time.monotonic() + timeout
+                    started = False
+                    answer = ""
+                    while time.monotonic() < deadline:
+                        if not page.url.startswith(allowed_prefixes):
+                            raise ValueError("Browser left the expected site after submission.")
+                        turn = observe_turn(panel)
+                        status, generating, answer = turn["status"], turn["generating"], turn["answer"]
+                        started = started or generating or status.strip() == "Rovo is thinking"
+                        if completed_turn(started=started, count=turn["count"], status=status,
+                                          generating=generating, answer=answer, before=before,
+                                          prompt_matches=turn["user_text"].strip() == prompt.strip()):
+                            lap("generate")
+                            record.update(execution_status="completed", submission_state="observed_submitted")
+                            record["continuity_status"] = "unavailable"
+                            save_request(directory, record)
+                            warnings = []
+                            try:
+                                signature = {"turn_count": turn["group_count"],
+                                             "turn_sha256": sha256(json.dumps([prompt.strip(), answer.strip()]).encode()).hexdigest()}
                                 if turn_signature(panel) != signature:
-                                    raise ValueError("Reopened conversation does not match the completed turn")
-                                record["chat_id"] = captured_id
-                            verified = record | signature | {"continuity_status": "verified"}
-                            save_request(directory, verified)
-                            record = verified
-                            message_id = last_message_id(panel)
-                            if message_id:
-                                owner.warm = {"page": page, "request_id": record["request_id"], "message_id": message_id}
-                        except Exception as error:
-                            if isinstance(error, ClickError):
-                                base["click_diagnostics"] = error.diagnostics
-                            warnings.append("Answer completed, but conversation continuity could not be verified. Do not resend; inspect the chat before --chat or use --new for another task.")
-                        lap("capture")
-                        return base | record | bounded_answer(answer) | {
-                            "retry_safe": False, "image_count": len(images), "elapsed_ms": round((time.monotonic()-started_at)*1000),
-                            "warnings": warnings}, 0
-                    page.wait_for_timeout(200)
-                record["execution_status"] = "timeout"
-                save_request(directory, record)
-                return base | record | {"partial_answer": answer[:12000], "retry_safe": False}, 3
+                                    raise ValueError("Completed conversation changed before capture")
+                                if not chat_id:
+                                    # Exactly one send from this tab after our Submit names the new chat.
+                                    if len(sends) != 1:
+                                        raise ValueError("New conversation ID is missing or ambiguous")
+                                    record["chat_id"] = sends[0]
+                                verified = record | signature | {"continuity_status": "verified"}
+                                save_request(directory, verified)
+                                record = verified
+                                message_id = last_message_id(panel)
+                                if message_id:
+                                    owner.warm = {"page": page, "request_id": record["request_id"], "message_id": message_id}
+                            except Exception:
+                                warnings.append("Answer completed, but conversation continuity could not be verified. Do not resend; inspect the chat before --chat or use --new for another task.")
+                            lap("capture")
+                            return base | record | bounded_answer(answer) | {
+                                "retry_safe": False, "image_count": len(images), "elapsed_ms": round((time.monotonic()-started_at)*1000),
+                                "warnings": warnings}, 0
+                        page.wait_for_timeout(200)
+                    record["execution_status"] = "timeout"
+                    save_request(directory, record)
+                    return base | record | {"partial_answer": answer[:12000], "retry_safe": False}, 3
     except (Exception, KeyboardInterrupt) as error:
         # Keep the original attempted_unknown record on disk; never hide uncertainty on failure.
         if isinstance(error, ClickError):

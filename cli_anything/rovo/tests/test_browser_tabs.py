@@ -66,10 +66,20 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     user.inner_text.return_value = PROMPT
     status.inner_text.side_effect = ["Rovo is thinking", "Response complete."]
 
+    # Rovo's send request names the conversation in its URL; tests may replace these.
+    listeners = {}
+    page.on.side_effect = lambda event, handler: listeners.setdefault(event, []).append(handler)
+    page.remove_listener.side_effect = lambda event, handler: listeners[event].remove(handler)
+    sends = ["12345678-1234-4234-8234-123456789abc"]
+
     def send():
         responses.count.return_value += 1
         groups.count.return_value += 1
         message.get_attribute.return_value = MESSAGE_ID.format(submit.click.call_count)
+        for chat in sends:
+            request = SimpleNamespace(method="POST", url=f"{ORIGIN}/gateway/api/assist/rovo/v1/chat/conversation/{chat}/message/stream/sse")
+            for handler in list(listeners.get("request", [])):
+                handler(request)
         if after_submit_url:
             page.url = after_submit_url
 
@@ -119,7 +129,7 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
                            responses=responses, groups=groups, welcome=welcome,
                            status=status, new_chat=new_chat, launcher=launcher, identity=identity,
                            rows=rows, row=row, content=content, user=user, message=message,
-                           search=search, more=more)
+                           search=search, more=more, menu=menu, back=back, sends=sends, listeners=listeners)
 
 
 @pytest.fixture
