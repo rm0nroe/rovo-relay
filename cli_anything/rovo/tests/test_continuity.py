@@ -242,3 +242,19 @@ def test_draft_appearing_after_new_chat_click_is_still_blocked(run_browser):
     assert code == 1 and "Existing draft" in result["message"], result
     target.textbox.fill.assert_not_called()
     target.submit.click.assert_not_called()
+
+
+def test_saved_row_below_loaded_history_is_scrolled_into_view(run_browser):
+    completed(run_browser)
+    target = existing()
+    target.search.is_visible.return_value = True
+    target.row.is_visible.return_value = False
+
+    def scroll(script, top):
+        assert top is False
+        target.row.is_visible.return_value = True
+    target.rows.last.evaluate.side_effect = scroll
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["chat_selection"] == "picker", result
+    target.rows.last.evaluate.assert_called_once()
+    target.row.click.assert_called_once()
