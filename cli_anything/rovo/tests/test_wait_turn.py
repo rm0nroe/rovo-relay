@@ -65,6 +65,8 @@ def separate_reads(panel):
         "answer": "\n".join(responses.last.locator(".ak-renderer-document").all_inner_texts()) if count else "",
         "group_count": groups.count(),
         "user_text": groups.last.locator(".ak-renderer-document").first.inner_text() if groups.count() else "",
+        "last_id": (groups.last.locator("[data-message-id]").get_attribute("data-message-id")
+                    if groups.count() and groups.last.locator("[data-message-id]").count() == 1 else None),
     }
 
 
@@ -129,3 +131,29 @@ def test_other_prompt_never_completes_early(page):
     started_at = time.monotonic()
     turn = wait_turn(panel, 0, "Another prompt", 800)
     assert time.monotonic() - started_at >= 0.75 and turn["status"] == "Response complete."
+
+
+VIRTUAL = (STATUS.format("Rovo is thinking")
+           + '<div data-testid="rovo-chat-message-group"><div class="ak-renderer-document">Old prompt</div>'
+           + '<div data-message-id="old">' + CARD.format(DOC.format("Old answer")) + '</div></div>'
+           + '<button aria-label="Stop generating"><svg></svg></button>')
+REPLACE = """() => setTimeout(() => {
+  const panel = document.querySelector('[data-testid="rovo-test-panel"]');
+  panel.querySelector('[data-testid="chat-history-status-live-region"]').textContent = 'Response complete.';
+  panel.querySelector('button').remove();
+  // A virtualized history drops the old turn as the new one renders: the count stays at one.
+  panel.querySelector('[data-testid="rovo-chat-message-group"]').outerHTML =
+    '<div data-testid="rovo-chat-message-group"><div class="ak-renderer-document">Synthetic prompt</div>'
+    + '<div data-message-id="new"><div data-testid="assistant-response-card-layout"><div class="ak-renderer-document">Done</div></div></div></div>';
+}, 300)"""
+
+
+@pytest.mark.parametrize("old_ids,early", [(["old"], True), (["old", "new"], False)])
+def test_virtualized_turn_completes_on_a_message_id_the_chat_did_not_have(page, old_ids, early):
+    panel = panel_for(page, VIRTUAL)
+    page.evaluate(REPLACE)
+    started_at = time.monotonic()
+    turn = wait_turn(panel, 1, "Synthetic prompt", 1500, old_ids)
+    elapsed = time.monotonic() - started_at
+    assert turn["count"] == 1 and turn["last_id"] == "new" and turn["answer"] == "Done"
+    assert (elapsed < 1) if early else (elapsed >= 1.4), elapsed

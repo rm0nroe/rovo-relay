@@ -103,8 +103,10 @@ def save_request(directory, record):
             os.unlink(name)
 
 
-def completed_turn(*, started, count, status, generating, answer, before=0, prompt_matches=True):
-    return started and count > before and prompt_matches and status.strip() == "Response complete." and generating is False and bool(answer.strip())
+def completed_turn(*, started, count, status, generating, answer, before=0, prompt_matches=True, new_id=False):
+    """new_id: the last turn carries a message ID the chat did not have before submit. A virtualized
+    panel can drop an old turn as the new one renders, so the count alone cannot prove a new turn."""
+    return started and (count > before or new_id is True) and prompt_matches and status.strip() == "Response complete." and generating is False and bool(answer.strip())
 
 
 def bounded_answer(answer, limit=12000):
