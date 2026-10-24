@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 from contextlib import contextmanager
+from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -38,9 +39,11 @@ def unresolved(record):
 
 
 def next_action(payload, code):
-    """The one agent decision for a direct result: ask, new_or_inspect, mcp_fallback, fix_or_report or stop."""
+    """The one agent decision for a direct result: ask, new_or_inspect, mcp_fallback, fix_or_report, reconcile or stop."""
     status, error = payload.get("execution_status"), payload.get("error_code")
     attempted = payload.get("submission_state") not in (None, "not_attempted")
+    if code == 4 and payload.get("reconcilable") is True:
+        return "reconcile"
     if code == 4 or status == "blocked" or (attempted and status != "completed"):
         return "stop"
     if status == "completed":
@@ -107,6 +110,27 @@ def completed_turn(*, started, count, status, generating, answer, before=0, prom
     """new_id: the last turn carries a message ID the chat did not have before submit. A virtualized
     panel can drop an old turn as the new one renders, so the count alone cannot prove a new turn."""
     return started and (count > before or new_id is True) and prompt_matches and status.strip() == "Response complete." and generating is False and bool(answer.strip())
+
+
+def provable(record):
+    """An uncertain attempt that names its chat, prompt hash and the turns the chat had before it."""
+    return bool(unresolved(record) and record.get("chat_id") and record.get("prompt_sha256")
+                and type(record.get("turns_before")) is int)
+
+
+def delivered(messages, prompt_sha256, before):
+    """(reply, None) when the prompt appears exactly once as a human turn after the first `before`
+    turns and Rovo answered it; otherwise (None, reason)."""
+    humans = [i for i, message in enumerate(messages) if message["role"] == "HUMAN"]
+    sent = [i for i in humans[before:] if sha256(messages[i]["text"].strip().encode()).hexdigest() == prompt_sha256]
+    if not sent:
+        return None, "prompt_missing"
+    if len(sent) > 1:
+        return None, "prompt_duplicated"
+    reply = messages[sent[0] + 1] if sent[0] + 1 < len(messages) else None
+    if not reply or reply["role"] != "ASSISTANT" or not reply["text"].strip():
+        return None, "answer_missing"
+    return reply, None
 
 
 def bounded_answer(answer, limit=12000):

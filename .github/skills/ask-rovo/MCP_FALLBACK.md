@@ -56,4 +56,4 @@ rovo-relay-cli --json --site SITE --session SESSION --account EMAIL mcp finish -
 
 Do not fill missing fields with desired values to pass validation. Only a successful finish clears the pending handoff. It validates correlation and types, caps the returned answer at 12,000 characters, and marks `completion_evidence: agent_observed` and `retrieval_assessment: unverified`. It cannot independently prove what the MCP browser displayed or verify code facts. Never edit local records manually to unblock a failed finish.
 
-Return the bounded answer with `transport: playwright_mcp`, truncation and retrieval caveats. Keep evidence private and outside Git. On failure, report the request ID and submission state without submitting again. Manual reconciliation of uncertain requests is not implemented.
+Return the bounded answer with `transport: playwright_mcp`, truncation and retrieval caveats. Keep evidence private and outside Git. On failure, report the request ID and submission state without submitting again. `reconcile` covers direct-CLI attempts only; an uncertain MCP reservation stays blocked.
