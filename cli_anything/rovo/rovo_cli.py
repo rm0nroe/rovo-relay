@@ -43,7 +43,7 @@ def cli(ctx, json_mode, site, session, account, chrome_port, approve_chrome_prom
 
 def capabilities():
     return {"version": __version__,
-            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action", "guarded Chrome prompt approval"],
+            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action", "guarded Chrome prompt approval", "reconcile"],
             "mcp_handoff": "agent_tools_with_local_guard"}
 
 
@@ -105,6 +105,16 @@ def ask(ctx, prompt_file, timeout, image, github_source, chat, new):
                 "github_source_requested": github_source, "chat_id": str(chat) if chat else None}, 0
     return acted(operate(*args, prompt=prompt, timeout=timeout, images=images, github_source=github_source,
                          chat_id=str(chat) if chat else None, new=new, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"), approve_chrome_prompt=ctx.obj.get("approve_chrome_prompt", False)))
+
+
+@cli.command()
+@click.pass_context
+def reconcile(ctx):
+    """Lift this session's uncertain-delivery block only if Rovo's own history proves it; never sends."""
+    args = target(ctx)
+    if ctx.obj["dry_run"]:
+        return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "action": "reconcile"}, 0
+    return acted(operate(*args, action="reconcile", connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"), approve_chrome_prompt=ctx.obj.get("approve_chrome_prompt", False)))
 
 
 @cli.group()
