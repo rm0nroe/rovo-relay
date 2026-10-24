@@ -25,6 +25,7 @@ Development Mac, one retained session, in seconds. "Before" is the baseline afte
 7. **Re-adopt the owned tab across restarts.** Only if gate 2 shows the host cannot keep one process alive.
 8. **New-chat capture from the send request.** Shipped and live-verified. A new chat's ID is read from the single Rovo send request (`POST .../chat/conversation/{id}/message/stream/sse`) the owned tab makes after Submit, so neither chat-list visit remains. The completed turn in that tab must still match; a missing, duplicate or malformed send leaves `continuity_status: unavailable` with the answer kept. If a bound ID were ever wrong, the next follow-up's saved-history check stops before sending. One live ask: select fell from 719 to 763 ms to 55 ms and capture from 1,155 ms to 14 ms, about 1.85 s per new chat. A read-only export of the bound ID showed exactly that turn. See [the measured results](VALIDATION.md#verified-new-chat-capture-2026-10-24).
 9. **Older history paging.** Shipped. `chat list`, `chat export` and the picker scroll Rovo's lazy history until Rovo reports the end, and report `coverage: "complete"` only then. Live: all 29 chats listed (25 were rendered before), and the oldest exported through the picker. See [Validation](VALIDATION.md#verified-history-paging-2026-10-24).
+10. **Close the tab after list and export.** Shipped. A successful `chat list` or `chat export` began idle, so at exit its tab closes unless a draft, attachment or response appeared since; a later operation in the same session clears that. Live: both commands left no window behind.
 
 ## Unverified or not implemented
 
@@ -34,6 +35,5 @@ Development Mac, one retained session, in seconds. "Before" is the baseline afte
 - Grounded GitHub retrieval and structured citations.
 - MCP fallback in a real Copilot session.
 - Loading older turns of a chat longer than one Rovo page (no such chat on the development site), and lists past Rovo's first 100 chats.
-- `chat list` and `chat export` retain their tab (picker or exported chat left open), so each leaves an off-screen window.
 - More than two images, upload error variants, uncertain-delivery reconciliation, other machines and OS versions, headless operation.
 - Token and billing savings measured in Copilot (current figures are byte estimates).
