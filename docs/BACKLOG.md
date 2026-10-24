@@ -28,7 +28,7 @@ macOS, one retained session, in seconds. "Before" is the baseline after candidat
 ## Unverified or not implemented
 
 - Long-term stability of the send-request URL used for new-chat capture. A change disables capture safely (`continuity_status: unavailable`), not delivery.
-- Cause of the original post-readiness pre-submit click timeout (diagnostics shipped in `7c5f895`; not reproduced). Clicks whose input the page never acknowledges now report `input_not_acknowledged`, which narrows the next occurrence.
+- Cause of the original post-readiness pre-submit click timeout (not reproduced). Likely the same hidden-tab pause behind the `Show more` timeouts, fixed by the CLI's own window (see [Validation](VALIDATION.md#verified-hidden-cli-window-2026-10-24)); a recurrence now reports `page_hidden` or `input_not_acknowledged`.
 - Mini-modal ask, list and export (blocked by `rovo_layout_unverified`).
 - Grounded GitHub retrieval and structured citations.
 - MCP fallback in a real Copilot session.
