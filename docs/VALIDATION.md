@@ -1,17 +1,23 @@
 # Validation status
 
-## Startup `Click timed out: Show more` explained (2026-10-24)
+## Verified hidden CLI window (2026-10-24)
 
-Neither occurrence is a CLI bug, and no code changed. The first was an Atlassian sign-in bounce during startup, fixed in `c9fc27d`. The second ran under a private network-capture harness that read every response body inside Playwright event handlers. Its recording went silent for about 6 seconds, ending when the click's 10-second readiness budget ran out.
+The CLI used to open its tab in the user's current Chrome window, which made it the active tab. When the user or another tool switched back, the CLI tab became hidden. Chrome pauses animation frames on hidden pages, and Playwright's click stability check waits for them, so clicks timed out. This is the cause of the startup `Click timed out: Show more` reports, not the capture harness named in an earlier version of this section.
 
-Five fresh status-only startups on the narrow window, with no questions sent, isolated the cause:
+Evidence, without Rovo questions: opening a tab the old way changed the user's visible Jira tab to `hidden`. A CLI page in a minimized window reported `hidden`, ran 0 animation frames in 1.5 s and reproduced `Click timed out: Show more`. The same page in a background window or moved off-screen ran 5 frames in about 40 ms and clicked in 7 to 95 ms.
 
-| Run | Show more click | `prepare` |
-|---|---:|---:|
-| Plain CLI (3 runs) | 43 to 173 ms | 1.2 to 1.4 s |
-| Same CLI plus body reads in a response handler (2 runs) | 462 to 502 ms | 5.4 to 5.6 s |
+The CLI now opens its tab in its own unfocused window, moved off-screen but not minimized (macOS keeps a thin sliver visible). A click that times out on a hidden page reports `reason: page_hidden`. At exit it also closes its idle tab when the tab shows exactly the session's last verified answer, so finished chats no longer leave windows behind; drafts, uncertain delivery and unverified content are still retained.
 
-All five passed and closed their own tabs. Blocking body reads slow readiness about fourfold, and one body that never finishes (seen in the same harness) stalls past the deadline. Test harnesses must not read response bodies synchronously in event handlers during startup.
+Live on the development Mac, through the installed candidate, 2 Rovo questions:
+
+| Step | Result |
+|---|---|
+| Startup and status | Ready; attach 4.1 s, prepare 1.1 s |
+| `ask --new` with two PNGs | Both uploads confirmed, `image_count: 2`, continuity verified, turn 1; generate 14.4 s |
+| Fresh process follow-up | Same chat through the picker (select 973 ms), turn 2 verified; export showed both pairs |
+| After both runs | The user's Jira tab stayed `visible`; no CLI tab or window remained |
+
+Rovo answered from the file names because the prompt prohibited tools, so this verifies the upload path, not Rovo's image reading. Offline: 316 passed and 11 opt-in skipped; 327 passed with `ROVO_DOM_CHECK=1`. Multiple-monitor placement is unverified: a display left of the main one could show the window.
 
 ## Verified pre-send read dedupe (2026-10-24)
 
