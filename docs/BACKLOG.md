@@ -2,15 +2,9 @@
 
 What remains, as of 2026-10-23 on `main` (package `0.1.0a6`). Details and evidence live in [Validation](VALIDATION.md) and [Connection improvements](CONNECTION_IMPROVEMENTS.md).
 
-## Blocked under Copilot
+## Copilot checks
 
-1. **Install and accept under Copilot.** Update to current `main`, then run the two-question continuity check from the [setup prompt](COPILOT_SETUP_PROMPT.md).
-2. **Session-lifetime gate.** Does Copilot keep one `session` process and its streams alive across separate skill invocations? Two `status` checks, one process, no Rovo question. See [Next gate](CONNECTION_IMPROVEMENTS.md#next-gate-reuse-across-skill-invocations).
-3. **Shorter host timeout.** Compare one failed and one successful trace from the same revision before changing any budget. See [Diagnose the shorter timeout](CONNECTION_IMPROVEMENTS.md#diagnose-the-shorter-timeout-before-changing-it).
-
-## Needs an access check (Atlassian admin or OAuth)
-
-4. **Official code access.** Check Code context eligibility, then discover MCP v2 `getCodeFile` and `searchCode` and fetch one known file. If it passes, code retrieval uses the official interface. See [First gate](CONNECTION_IMPROVEMENTS.md#first-gate-official-access).
+Open: whether Copilot keeps one session process alive between commands (see [Connection improvements](CONNECTION_IMPROVEMENTS.md)).
 
 ## Speed work (architecture review, candidate 1 shipped in `5299567`)
 
