@@ -1,5 +1,6 @@
 """Automatic continuation must bind verified history, never picker order or titles."""
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -75,10 +76,10 @@ def test_invalid_binding_never_attaches(run_browser, tmp_path, change):
     target.submit.click.assert_not_called()
 
 
-@pytest.mark.parametrize("ids", [[], [CHAT, OTHER], ["malformed"]])
+@pytest.mark.parametrize("ids", [[], [CHAT, OTHER], ["not-a-uuid"]])
 def test_capture_failure_preserves_answer_and_blocks_implicit_followup(run_browser, tmp_path, ids):
     target = page_fixture(ORIGIN + "/jira/for-you")
-    target.rows.evaluate_all.side_effect = [[], ids]
+    target.sends[:] = ids
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 0 and result["answer"] == "Synthetic answer", result
     assert result["continuity_status"] == "unavailable" and result["retry_safe"] is False
@@ -88,9 +89,30 @@ def test_capture_failure_preserves_answer_and_blocks_implicit_followup(run_brows
     target.submit.click.assert_called_once()
 
 
-def test_new_id_must_reopen_matching_turn(run_browser):
+def test_new_chat_binds_from_send_request_without_picker(run_browser):
     target = page_fixture(ORIGIN + "/jira/for-you")
-    target.row.click.side_effect = lambda: setattr(target.user.inner_text, "return_value", "Unrelated conversation")
+    completed(lambda **kwargs: run_browser(target, **kwargs))
+    target.menu.click.assert_not_called()
+    target.back.click.assert_not_called()
+    target.row.click.assert_not_called()
+    target.rows.evaluate_all.assert_not_called()
+    assert target.listeners["request"] == []
+
+
+def test_send_request_from_another_site_is_ignored(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    send = target.submit.click.side_effect
+    def other_site():
+        send()
+        request = SimpleNamespace(method="POST", url=f"https://other.atlassian.net/gateway/api/assist/rovo/v1/chat/conversation/{OTHER}/message/stream/sse")
+        target.listeners["request"][0](request)
+    target.submit.click.side_effect = other_site
+    assert completed(lambda **kwargs: run_browser(target, **kwargs))["chat_id"] == CHAT
+
+
+def test_completed_turn_changed_before_capture_is_not_bound(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.content.all_inner_texts.side_effect = [["Synthetic answer"]] * 2 + [["Different response"]] * 9
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 0 and result["continuity_status"] == "unavailable", result
     assert result["chat_id"] is None
