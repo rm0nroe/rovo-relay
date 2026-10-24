@@ -1,5 +1,13 @@
 # Validation status
 
+## Verified in-page completion wait (2026-10-24)
+
+After Submit, the CLI no longer checks for completion every 200 ms. One wait inside the page watches the Rovo panel for changes and returns as soon as the same completion rules hold, or after at most one second so the site and deadline checks still run. The CLI then applies its own completion check to that result before accepting it.
+
+On synthetic HTML in a throwaway headless Chrome, the wait returned a median **1.6 ms** (maximum 3.2 ms, 20 runs) after the page showed a completed turn. The old 200 ms poll noticed completion 0 to 200 ms late, about 100 ms on average.
+
+The change passed **306 tests** from source and from the installed wheel, with **11 opt-in local-browser checks skipped** in each; the 11 opt-in checks also passed when enabled. All 15 packaged files matched source. One synthetic `ask --new` then ran through the installed CLI in normal Chrome and completed with verified continuity, the expected answer and turn count one. Generation took 7,382 ms, against 7,527 ms for the previous single run; that difference is Rovo's own variance and does not measure the saving. One question was sent; no submission was retried. The first startup attempt stopped at Chrome approval before any page action and was not counted.
+
 ## Verified new-chat capture (2026-10-24)
 
 A passive observer on the owned tab showed that Rovo's send request names the new conversation in its URL: exactly one `POST {site}/gateway/api/assist/rovo/v1/chat/conversation/{id}/message/stream/sse`, sent about 90 ms after Submit, with the prompt in its body. The ID appeared in no earlier request, and it matched the ID the previous picker comparison, reopen and turn-hash check verified. The request streams the answer and never finishes, so the CLI reads it as it starts. Analytics beacons, read-status updates and browser storage were rejected as sources.
