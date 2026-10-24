@@ -10,7 +10,7 @@ The supplied Copilot-host reports describe separate processes closing between at
 
 The reported internal repository test completed through the bridge, but Rovo described a file-download result without source contents. That explanation is not independently inspected connector evidence. The bridge reads the rendered response; it cannot repair missing upstream file contents. Keep response completion and retrieval assessment separate.
 
-The initial diagnostics scope excludes live questions, uploads and extra usage. Local testing was subsequently authorized where the local Rovo is sufficiently comparable; matching visible controls alone does not establish matching connector access or host behavior. Browser-policy changes, automatic approval and uncertain-submission retries remain excluded. Keep mini-modal ask/list/export blocked. Reuse the existing request records, locks, completion predicate and per-operation account/tab checks.
+The initial diagnostics scope excludes live questions, uploads and extra usage. Local testing was subsequently authorized where the local Rovo is sufficiently comparable; matching visible controls alone does not establish matching connector access or host behavior. Browser-policy changes and uncertain-submission retries remain excluded. Keep mini-modal ask/list/export blocked. Reuse the existing request records, locks, completion predicate and per-operation account/tab checks.
 
 ## Shipped: attachment and click diagnostics
 
