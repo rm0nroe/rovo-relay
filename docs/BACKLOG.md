@@ -18,7 +18,7 @@ Measured baseline after candidate 1, one retained session on macOS, in seconds:
 | `attach` + `prepare` | 0.04 | 0.01 |
 | Total | 9.5 | 7.8 |
 
-5. **Single snapshot per completion check.** Replace about six browser reads per 200 ms tick with one. Its gain sits inside `generate`; compare the same question before and after.
+5. **Single snapshot per completion check.** Shipped: one page read per 200 ms tick instead of about six, so each check sees one consistent moment. Live check on macOS (narrow 756 px window, same two prompts, one sample each): both answers verified, but `generate` did not drop (new chat 6.7 s before, 8.5 s after; follow-up 6.5 s before, 6.8 s after). Rovo's own writing time varies more than the polling saves, so a speed gain is unproven; repeat samples before counting one.
 6. **Warm-tab fast path.** Skip the picker on an untouched owned tab (targets `select`). Decide first whether same tab, same last-turn hash and no navigation is enough identity evidence.
 7. **Re-adopt the owned tab across restarts.** Only if gate 2 shows the host cannot keep one process alive.
 
