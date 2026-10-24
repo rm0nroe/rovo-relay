@@ -489,9 +489,13 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                            "retry_safe": not unresolved(prior)}, 0
                 textbox = panel.get_by_role("textbox")
                 require_idle(panel)
+                # Recheck idle only after an unchecked click (open_conversation checks its own); reads cannot change it.
+                idle_checked = True
+                selected_turn = None
                 responses = panel.get_by_test_id("assistant-response-card-layout")
                 if chat_id and warm_tab(panel, page, warm, prior if automatic else None, opened):
                     base["chat_selection"] = "warm_tab"
+                    selected_turn = {key: prior.get(key) for key in ("turn_count", "turn_sha256")}
                 elif chat_id or action == "chat_list":
                     if chat_id:
                         base["chat_selection"] = "picker"
@@ -502,9 +506,11 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         return base | {"execution_status": "completed", "chats": chats,
                                        "coverage": "loaded_only", "truncated": rows.count() > 100}, 0
                     open_conversation(panel, chat_id)
-                    if automatic and turn_signature(panel) != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
-                        base["error_code"] = "conversation_changed"
-                        raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
+                    if automatic:
+                        selected_turn = turn_signature(panel)
+                        if selected_turn != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
+                            base["error_code"] = "conversation_changed"
+                            raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
                     if action == "chat_export":
                         turns = panel.get_by_test_id("rovo-chat-message-group").evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
                         messages, remaining = [], 24000
@@ -522,6 +528,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     new_chat = panel.get_by_role("button", name="New chat", exact=True)
                     if new_chat.is_enabled():
                         click_control(new_chat, "New chat")
+                        idle_checked = False
                         page.wait_for_function("""() => document.querySelectorAll('[data-testid="assistant-response-card-layout"]').length === 0""")
                     else:
                         welcome = panel.get_by_role("heading", name=re.compile(r"^How can I help(?:, .+)?\?$"))
@@ -532,8 +539,10 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
                 lap("select")
                 before = responses.count()
-                selected_turn = turn_signature(panel) if chat_id else None
-                require_idle(panel)
+                if chat_id and selected_turn is None:
+                    selected_turn = turn_signature(panel)
+                if not idle_checked:
+                    require_idle(panel)
                 if github_source is not None:
                     picker = panel.locator('button[data-spotlight-target="rovo-chat-web-search-spotlight-target"]')
                     click_control(picker, "Source picker (open)")
