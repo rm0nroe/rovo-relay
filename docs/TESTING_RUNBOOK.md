@@ -132,7 +132,7 @@ installed = Path(cli_anything.rovo.__file__).resolve().parent
 assert installed != source.resolve(), 'Checkout is masking the installed package'
 expected = {p.relative_to(source) for p in source.rglob('*.py')
             if 'tests' not in p.relative_to(source).parts}
-expected |= {Path('README.md')}
+expected |= {Path('README.md'), Path('utils/allow.sh')}
 expected |= {p.relative_to(source) for p in (source / 'skills').glob('*.md')}
 actual = {p.relative_to(installed) for p in installed.rglob('*')
           if p.is_file() and '__pycache__' not in p.parts}
@@ -239,7 +239,7 @@ For a restart test, close stdin only after verified completion, wait for normal 
 
 For existing-chat-to-new-chat acceptance, first export the verified synthetic chat using its observed ID. Confirm that chat is visible and New chat is enabled, then send one authorized `ask --new`. Require a distinct new ID and one new user/assistant pair. Export both chats read-only: the original must be unchanged and the saved binding must point to the new chat. For restart continuity, export the continued chat and compare the preserved first pair plus the added second pair. Read-only exports add no questions and do not change the saved binding. Keep actual IDs and transcript text out of Git.
 
-Verify negative cases offline: wrong account/site, old records without a binding, missing/ambiguous IDs, altered history, a missing picker row, draft changes during fill, and `--new` combined with `--chat`. New-chat capture is limited to loaded picker rows; the reopened turn hash and loaded count must match. Do not weaken those checks just to make an unfamiliar history layout pass.
+Verify negative cases offline: wrong account/site, old records without a binding, missing/ambiguous IDs, altered history, a missing picker row, draft changes during fill, and `--new` combined with `--chat`. New-chat capture requires exactly one send request from the owned tab after Submit, and the completed turn hash and loaded count must match. Do not weaken those checks just to make an unfamiliar history layout pass.
 
 A completed response with `continuity_status: unavailable` is still delivered. Preserve its answer and warning, stop implicit follow-up, and inspect before an explicitly authorized observed `--chat` selection. Do not resend the original prompt or silently use `--new` to hide failure.
 
