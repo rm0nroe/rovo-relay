@@ -1,5 +1,21 @@
 # Validation status
 
+## Verified pre-send read dedupe (2026-10-24)
+
+Before sending, the CLI no longer repeats reads it has just taken. The idle check (composer, draft, attachments, active response) runs again only after a click it has not already checked, and the conversation signature verified during chat selection is reused instead of read again. Every check after the prompt is filled still runs.
+
+| Path | Idle checks | Signature reads | Round trips saved |
+|---|---:|---:|---:|
+| Follow-up in the open chat | 2 to 1 | 4 to 3 | about 9 |
+| Follow-up through the picker | 3 to 2 | 4 to 3 | about 9 |
+| Explicit `--chat` | 3 to 2 | 3 to 3 | about 6 |
+| New chat, verified empty | 2 to 1 | 1 to 1 | about 6 |
+| New chat, clicked | 2 to 2 | 1 to 1 | 0 |
+
+Each round trip costs about 1 to 3 ms, so the saving is tens of milliseconds at most. The counts are asserted by offline tests.
+
+The change passed **311 tests** from source and from the installed wheel, with **11 opt-in local-browser checks skipped** in each; all 322 passed with the opt-in checks enabled. All 15 packaged files matched source. One synthetic automatic follow-up then ran through the installed CLI in a fresh process, so it used the picker: it completed with verified continuity, the expected answer and turn count two. Selection took 1,401 ms, dominated by the picker's own clicks; one sample cannot show a saving this small. One question was sent; no submission was retried.
+
 ## Verified in-page completion wait (2026-10-24)
 
 After Submit, the CLI no longer checks for completion every 200 ms. One wait inside the page watches the Rovo panel for changes and returns as soon as the same completion rules hold, or after at most one second so the site and deadline checks still run. The CLI then applies its own completion check to that result before accepting it.
