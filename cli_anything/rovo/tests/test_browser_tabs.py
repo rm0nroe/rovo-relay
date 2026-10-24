@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from itertools import count
 
 import pytest
-from playwright.sync_api import Browser, Locator, Page, TimeoutError
+from playwright.sync_api import Browser, Error, Locator, Page, TimeoutError
 
 from cli_anything.rovo.core.state import read_request, state_dir
 from cli_anything.rovo.utils import rovo_backend
@@ -84,10 +84,12 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
             page.url = after_submit_url
 
     submit.click.side_effect = send
-    panel.evaluate.side_effect = lambda script: {
+    # One in-page completion wait returns one snapshot; "started" is what the page saw during it.
+    panel.evaluate.side_effect = lambda script, arg=None: {
         "status": status.inner_text(), "generating": stop.is_visible(), "count": responses.count(),
         "answer": "\n".join(content.all_inner_texts()) if responses.count() else "",
         "group_count": groups.count(), "user_text": user.inner_text() if groups.count() else "",
+        "started": False,
     }
     groups.last.get_by_test_id.return_value.locator.return_value = content
     new_chat.click.side_effect = lambda: (setattr(responses.count, "return_value", 0), setattr(groups.count, "return_value", 0))
@@ -256,6 +258,40 @@ def test_navigation_after_submit_keeps_uncertainty_and_never_reselects(run_brows
     assert record["submission_state"] == "attempted_unknown"
     result, code = rovo_backend.operate(ORIGIN, "another-session", ACCOUNT, prompt=PROMPT)
     assert code == 4 and result["retry_safe"] is False
+    target.submit.click.assert_called_once()
+
+
+def test_completion_is_awaited_in_page_not_by_polling(run_browser):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1")
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["answer"] == "Synthetic answer", result
+    args = [call.args[1] for call in target.panel.evaluate.call_args_list]
+    assert args and all(arg["before"] == 0 and arg["prompt"] == PROMPT and 0 < arg["ms"] <= 1000 for arg in args)
+    assert 200 not in [call.args[0] for call in target.page.wait_for_timeout.call_args_list]
+
+
+@pytest.mark.parametrize("seen", [True, False])
+def test_start_seen_only_inside_the_page_wait_still_counts(run_browser, tmp_path, seen):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1")
+    target.status.inner_text.side_effect = None
+    target.status.inner_text.return_value = "Response complete."
+    snapshot = target.panel.evaluate.side_effect
+    target.panel.evaluate.side_effect = lambda script, arg=None: snapshot(script, arg) | {"started": seen}
+    result, code = run_browser(target, prompt=PROMPT, timeout=1)
+    assert (code, result["execution_status"]) == ((0, "completed") if seen else (3, "timeout")), result
+    target.submit.click.assert_called_once()
+
+
+def test_navigation_during_page_wait_keeps_uncertainty(run_browser, tmp_path):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1")
+
+    def navigate(script, arg=None):
+        target.page.url = ORIGIN + "/wiki/spaces/DEMO"
+        raise Error("Execution context was destroyed, most likely because of a navigation")
+    target.panel.evaluate.side_effect = navigate
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and "left the expected site after submission" in result["message"], result
+    assert result["submission_state"] == "attempted_unknown" and result["retry_safe"] is False
     target.submit.click.assert_called_once()
 
 
