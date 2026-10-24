@@ -17,6 +17,16 @@ The development site has no chat longer than one Rovo page, so loading older tur
 
 Both commands first retained their tab, because cleanup could not prove the picker or an exported chat idle. Now a successful list or export (which checks idle before it starts) marks its tab, and exit closes it unless a draft, attachment or response appeared since. Rerun live, 0 questions: list (29, complete) and export (complete) each exited with no retention notice and no CLI window left; the user's tabs were unchanged. Offline: 335 passed and 11 skipped; 346 with `ROVO_DOM_CHECK=1`; installed 335 with 11 skipped.
 
+A live `session` run then found that a list left the conversation picker open, so the next command could not find the composer and stopped before sending (`submission_state: not_attempted`). The list now clicks `Go back to Rovo chat` before it returns. Rerun through the installed candidate, 2 Rovo questions:
+
+| Step | Result |
+|---|---|
+| Session 1: status, `chat list`, `ask --chat` of the chat at row 29, export | List complete (29); ask verified at turn 2 through the picker below the first 25 rows (select 1.4 s); export complete with all 4 messages |
+| Session 2, fresh process: automatic follow-up, then `chat list` | Same chat, verified turn 3 with the correct recalled code; list complete (29) |
+| After both sessions | No retention notice and no CLI window; the user's tabs unchanged |
+
+By session 2 the chat had moved to the top of the list, so only session 1 exercised the picker scroll during an ask. Offline: 336 passed and 11 skipped; 347 with `ROVO_DOM_CHECK=1`.
+
 ## Verified hidden CLI window (2026-10-24)
 
 The CLI used to open its tab in the user's current Chrome window, which made it the active tab. When the user or another tool switched back, the CLI tab became hidden. Chrome pauses animation frames on hidden pages, and Playwright's click stability check waits for them, so clicks timed out. This is the cause of the startup `Click timed out: Show more` reports, not the capture harness named in an earlier version of this section.
