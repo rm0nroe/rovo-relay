@@ -23,24 +23,27 @@ from cli_anything.rovo.utils.rovo_backend import BrowserConnection, operate
 @click.option("--session")
 @click.option("--account", help="Expected Atlassian account email, checked before sending.")
 @click.option("--chrome-port", type=click.IntRange(1, 65535), help="Verified existing-Chrome loopback debugging port; preserves Chrome approval.")
+@click.option("--approve-chrome-prompt", is_flag=True, help="Authorize guarded macOS approval for this CLI connection only; requires --chrome-port.")
 @click.option("--dry-run", is_flag=True, help="Validate only; do not touch browser or request state.")
 @click.pass_context
-def cli(ctx, json_mode, site, session, account, chrome_port, dry_run):
+def cli(ctx, json_mode, site, session, account, chrome_port, approve_chrome_prompt, dry_run):
     """Experimental existing-Chrome bridge. See packaged skill for implemented scope."""
     connection = (ctx.obj or {}).get("connection")
     if connection is not None and chrome_port is not None and chrome_port != connection.chrome_port:
         raise click.UsageError("The active connection's Chrome port cannot change; exit the session first.")
-    ctx.obj = dict(site=site, session=session, account=account, chrome_port=chrome_port, dry_run=dry_run,
+    if connection is not None and approve_chrome_prompt and not connection.approve_chrome_prompt:
+        raise click.UsageError("Chrome approval policy cannot change inside an active session.")
+    ctx.obj = dict(approve_chrome_prompt=approve_chrome_prompt, site=site, session=session, account=account, chrome_port=chrome_port, dry_run=dry_run,
                    connection=(ctx.obj or {}).get("connection"))
     if ctx.invoked_subcommand is None:
         if ctx.obj["connection"] is not None or json_mode or not sys.stdin.isatty():
             raise click.UsageError("Choose doctor, session, status, chat or ask for noninteractive use.")
-        return repl(chrome_port)
+        return repl(chrome_port, approve_chrome_prompt)
 
 
 def capabilities():
     return {"version": __version__,
-            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action"],
+            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action", "guarded Chrome prompt approval"],
             "mcp_handoff": "agent_tools_with_local_guard"}
 
 
@@ -74,7 +77,7 @@ def status(ctx):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "site": args[0]}, 0
-    return acted(operate(*args, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
+    return acted(operate(*args, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"), approve_chrome_prompt=ctx.obj.get("approve_chrome_prompt", False)))
 
 
 @cli.command()
@@ -101,7 +104,7 @@ def ask(ctx, prompt_file, timeout, image, github_source, chat, new):
                 "conversation_mode": "new" if new else "explicit" if chat else "automatic",
                 "github_source_requested": github_source, "chat_id": str(chat) if chat else None}, 0
     return acted(operate(*args, prompt=prompt, timeout=timeout, images=images, github_source=github_source,
-                         chat_id=str(chat) if chat else None, new=new, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
+                         chat_id=str(chat) if chat else None, new=new, connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"), approve_chrome_prompt=ctx.obj.get("approve_chrome_prompt", False)))
 
 
 @cli.group()
@@ -115,7 +118,7 @@ def chat_list(ctx):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "action": "chat_list"}, 0
-    return acted(operate(*args, action="chat_list", connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
+    return acted(operate(*args, action="chat_list", connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"), approve_chrome_prompt=ctx.obj.get("approve_chrome_prompt", False)))
 
 
 @chat.command("export")
@@ -125,7 +128,7 @@ def chat_export(ctx, chat_id):
     args = target(ctx)
     if ctx.obj["dry_run"]:
         return {"schema_version": 1, "execution_status": "completed", "dry_run": True, "chat_id": str(chat_id)}, 0
-    return acted(operate(*args, action="chat_export", chat_id=str(chat_id), connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port")))
+    return acted(operate(*args, action="chat_export", chat_id=str(chat_id), connection=ctx.obj.get("connection"), chrome_port=ctx.obj.get("chrome_port"), approve_chrome_prompt=ctx.obj.get("approve_chrome_prompt", False)))
 
 
 @cli.group()
@@ -198,13 +201,13 @@ def run(args):
 
 
 @contextmanager
-def foreground_connection(chrome_port=None):
+def foreground_connection(chrome_port=None, approve_chrome_prompt=False):
     def interrupt(signum, frame):
         raise KeyboardInterrupt
 
     previous = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
-        with BrowserConnection(chrome_port) as connection:
+        with BrowserConnection(chrome_port, approve_chrome_prompt) as connection:
             yield connection
     finally:
         for sig, handler in previous.items():
@@ -244,7 +247,7 @@ def session(ctx):
         raise click.UsageError("A foreground session is already active.")
     if ctx.obj["dry_run"]:
         return emit(invoke([], command=status, obj=ctx.obj), stream=True)
-    with foreground_connection(ctx.obj["chrome_port"]) as connection:
+    with foreground_connection(ctx.obj["chrome_port"], ctx.obj["approve_chrome_prompt"]) as connection:
         config = ctx.obj | {"connection": connection}
         result = invoke([], command=status, obj=config)
         emit((result[0] | capabilities(), result[1]), stream=True)
@@ -268,14 +271,14 @@ def session(ctx):
                 return result[1]
 
 
-def repl(chrome_port=None):
+def repl(chrome_port=None, approve_chrome_prompt=False):
     from cli_anything.rovo.utils.repl_skin import ReplSkin
     skin = ReplSkin("rovo-relay-cli", version=__version__, history_file=os.devnull)
     skin.skill_install_cmd = "Copy the packaged skills directory into .github/skills/ask-rovo (including MCP_FALLBACK.md)"
     skin.print_banner()
     prompt = skin.create_prompt_session()
     code = 0
-    with foreground_connection(chrome_port) as connection:
+    with foreground_connection(chrome_port, approve_chrome_prompt) as connection:
         while True:
             try:
                 line = skin.get_input(prompt)

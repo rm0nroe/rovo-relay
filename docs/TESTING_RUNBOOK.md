@@ -248,6 +248,7 @@ A completed response with `continuity_status: unavailable` is still delivered. P
 | Observation | Next step |
 |---|---|
 | `chrome_debugging_unavailable` | Inspect discovery, OS/user alignment and the existing Chrome setting; verify any explicit port before a status-only attempt |
+| `chrome_approval_failed` | Stop before submission; save the sanitized helper error, preserve retry state, leave other clients/prompts untouched; no helper or ask retry |
 | `chrome_connection_failed` | Record phase, elapsed time, caller deadline and whether the owner actually saw/approved the prompt; no automatic endpoint change |
 | Need connection evidence before any submission | One status attempt with `DEBUG=pw:browser`, stderr saved privately; no protocol tracing and no ask |
 | `authentication_required` | Verify intended account and supported sign-in state; do not send to another account |
@@ -292,3 +293,9 @@ Commit/push only when authorized. Before committing, check status and merge stat
 | Narrow-window readiness, `7de0fbc` | 249 installed offline tests; failing overflow regression reproduced before fix; installed startup and another status passed at narrow width; saved request unchanged; zero questions | Read-only live validation after this final fix; older post-readiness timeout remains unidentified |
 
 These counts describe specific candidates, not permanent expected totals. Synthetic continuity without “remember” wording has passed locally, including after process restart; it has not been accepted in the actual Copilot host. Detailed current scope is recorded in [Validation status](VALIDATION.md#current-development-baseline-2026-10-23).
+
+## Guarded Chrome approval acceptance
+
+Use a build whose `doctor` lists `guarded Chrome prompt approval`. Verify the installed wheel includes `utils/allow.sh` and `utils/chrome_approval.py`. Offline tests must cover an existing foreign prompt, a foreign socket, a second prompt arriving before the click, changed window identity/bounds, missing prerequisites, and helper failure before any page or Submit action. Keep manual mode and MCP fallback guard tests green.
+
+With explicit authorization and the target’s existing debugging port verified, start one retained `session` with `--chrome-port PORT --approve-chrome-prompt`. Do not run a separate approval helper. Save startup JSON and confirm authenticated idle readiness with no human click. Only if a live question is authorized, send one synthetic prompt once and verify completion. Never retry an uncertain ask. A second-agent prompt test is read-only: leave that prompt pending, start the guarded connection, require `chrome_approval_failed` before a new attachment, and verify the other prompt remains untouched. Stop only test-owned processes and close only test-owned tabs; preserve evidence outside Git. Do not change policy to manufacture a failure.
