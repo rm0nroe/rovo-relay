@@ -14,6 +14,7 @@ from playwright.sync_api import Browser, Error
 from cli_anything.rovo import rovo_cli
 from cli_anything.rovo.core.state import read_request, save_request, site_lock, state_dir
 from cli_anything.rovo.utils import rovo_backend
+from test_continuity import count_reads
 from test_browser_tabs import ACCOUNT, MESSAGE_ID, MINI_PANEL, ORIGIN, PROMPT, page_fixture
 
 FLAGS = ["--site", ORIGIN, "--session", "pilot", "--account", ACCOUNT]
@@ -538,6 +539,7 @@ def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkey
     prompt = tmp_path / "question.txt"
     prompt.write_text(PROMPT)
     browser_env.target.status.inner_text.side_effect = ["Rovo is thinking", "Response complete."] * 2
+    calls = count_reads(monkeypatch)
     code, results = stream(monkeypatch, capsys, [["ask", "--prompt-file", str(prompt)]] * 2)
     assert code == 0 and [r["exit_code"] for r in results] == [0, 0, 0], results
     first, second = results[1:]
@@ -549,6 +551,9 @@ def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkey
     assert browser_env.target.submit.click.call_count == 2
     # New-chat capture binds from the send request; the follow-up reuses the verified open chat.
     browser_env.target.row.click.assert_not_called()
+    # New chat: idle before and after the click, signature at capture. Warm follow-up: one idle
+    # check; signature in warm_tab, after fill and at capture.
+    assert calls == {"require_idle": 2 + 1, "turn_signature": 1 + 3}
 
 
 def warm_ask(connection):
