@@ -196,7 +196,7 @@ For tab/readiness changes, exercise only the relevant cases using agent-created 
 
 | Case | Required observation |
 |---|---|
-| Several Jira/Rovo tabs already open | CLI prepares its own tab; user tabs remain unchanged |
+| Several Jira/Rovo tabs already open | CLI prepares its own tab in its own off-screen window; user tabs remain unchanged and the user's active tab stays `visible` |
 | Synthetic draft in a separate test tab | Draft survives status and owned-tab preparation |
 | Owned panel closed | Next status opens it without refreshing the page |
 | Narrow header with Show more | Account verification leaves overflow open through the Ask Rovo click; startup and another status succeed without resizing |
@@ -275,7 +275,7 @@ Limits: missing evidence, unsupported layouts, skipped checks, later code change
 Cleanup: process detached; owned tabs/drafts/scaffolding removed or specifically retained
 ```
 
-Keep output and evidence, even from failed tests. Close stdin and wait for detachment before cleanup. The CLI retains populated, draft-bearing, uncertain or unverified tabs; that is deliberate. After a completed test, close only the known agent-created disposable tabs, preserving remote chat/request history and all user tabs. Remove only the synthetic drafts you created. Do not delete populated state directories or completion records to make the workspace look clean.
+Keep output and evidence, even from failed tests. Close stdin and wait for detachment before cleanup. The CLI closes its idle tab when it shows exactly the last verified answer, and retains draft-bearing, uncertain or unverified tabs; that is deliberate. After a completed test, close only the known agent-created disposable tabs, preserving remote chat/request history and all user tabs. Remove only the synthetic drafts you created. Do not delete populated state directories or completion records to make the workspace look clean.
 
 If Rovo unexpectedly creates a test memory, identify the exact entry, obtain any required deletion confirmation, remove only that entry and verify the UI result. Do not disable memory globally or delete unrelated memories. The earlier synthetic memory was removed after explicit owner approval; that approval is not reusable for other entries.
 
