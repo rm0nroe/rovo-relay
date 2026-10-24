@@ -150,7 +150,7 @@ PY
 )
 ```
 
-At `7de0fbc`, the package contains 13 source/document files; the older continuity baseline had 12. Compare these four repository mirror pairs as well:
+At `41ca8de`, the package contains 13 source/document files; the older continuity baseline had 12. Compare these four repository mirror pairs as well:
 
 - `README.md` and `cli_anything/rovo/README.md`.
 - `.github/skills/ask-rovo/SKILL.md` and `cli_anything/rovo/skills/SKILL.md`.
@@ -287,10 +287,10 @@ Commit/push only when authorized. Before committing, check status and merge stat
 
 | Candidate | What was measured | Limits |
 |---|---|---|
-| Tab/readiness fix, `740c16a` | 185 offline tests; 12 installed files and three mirrors matched; normal-Chrome tab reuse, panel reopen, closed-tab replacement and draft preservation; no Rovo question | Development Mac only; pinned isolated build unavailable |
-| Continuity enhancement, `0445e91` | 205 installed offline tests; 12 files and three mirrors matched; three live turns used one captured chat without `--chat`, including a fresh process; test memory cleanup verified | Final pre-submit/persistence refinements were verified offline after live tests; no additional live question was sent for those refinements; Copilot-host and grounded retrieval acceptance remain open |
-| Click diagnostics and later continuity acceptance, `c9f380a` | 246 installed offline tests; three later authorized questions verified empty-screen new chat, existing-chat switch and restart continuation; read-only exports and saved signatures matched | An initial narrow-window startup failed before submission; expanded-window restart passed; Copilot-host and retrieval acceptance remain open |
-| Narrow-window readiness, `7de0fbc` | 249 installed offline tests; failing overflow regression reproduced before fix; installed startup and another status passed at narrow width; saved request unchanged; zero questions | Read-only live validation after this final fix; older post-readiness timeout remains unidentified |
+| Tab/readiness fix, `a20e948` | 185 offline tests; 12 installed files and three mirrors matched; normal-Chrome tab reuse, panel reopen, closed-tab replacement and draft preservation; no Rovo question | Development Mac only; pinned isolated build unavailable |
+| Continuity enhancement, `bcb1554` | 205 installed offline tests; 12 files and three mirrors matched; three live turns used one captured chat without `--chat`, including a fresh process; test memory cleanup verified | Final pre-submit/persistence refinements were verified offline after live tests; no additional live question was sent for those refinements; Copilot-host and grounded retrieval acceptance remain open |
+| Click diagnostics and later continuity acceptance, `7c5f895` | 246 installed offline tests; three later authorized questions verified empty-screen new chat, existing-chat switch and restart continuation; read-only exports and saved signatures matched | An initial narrow-window startup failed before submission; expanded-window restart passed; Copilot-host and retrieval acceptance remain open |
+| Narrow-window readiness, `41ca8de` | 249 installed offline tests; failing overflow regression reproduced before fix; installed startup and another status passed at narrow width; saved request unchanged; zero questions | Read-only live validation after this final fix; older post-readiness timeout remains unidentified |
 
 These counts describe specific candidates, not permanent expected totals. Synthetic continuity without “remember” wording has passed locally, including after process restart; it has not been accepted in the actual Copilot host. Detailed current scope is recorded in [Validation status](VALIDATION.md#current-development-baseline-2026-10-23).
 

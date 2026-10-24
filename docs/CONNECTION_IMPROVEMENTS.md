@@ -4,7 +4,7 @@
 
 Primary-source research is recorded in [Connection findings](CONNECTION_FINDINGS.md). Chrome's maintainers recommend longer connection sessions, not persistent approval. Code context is a separate capability whose availability must be checked in the target organization.
 
-Original research baseline: `b169fe0`; current code/evidence review: `7de0fbc` on 2026-10-23. The CLI reuses one Chrome connection inside `session` and the human REPL. `BrowserConnection.get()` attaches once; EOF, terminal errors and process shutdown detach. The skill requests a retained foreground process, then instructs the agent to close stdin when finished. It does not establish reuse across separate skill invocations or expose a local connection service. Verified conversation state now persists across process restarts; browser connections and approval do not.
+Original research baseline: `3e914a7`; current code/evidence review: `41ca8de` on 2026-10-23. The CLI reuses one Chrome connection inside `session` and the human REPL. `BrowserConnection.get()` attaches once; EOF, terminal errors and process shutdown detach. The skill requests a retained foreground process, then instructs the agent to close stdin when finished. It does not establish reuse across separate skill invocations or expose a local connection service. Verified conversation state now persists across process restarts; browser connections and approval do not.
 
 The supplied Copilot-host reports describe separate processes closing between attempts. That explains new attachment attempts, not every failed handshake. The CDP attachment timeout is 20 seconds; a shorter reported failure may originate in Playwright startup, the caller's deadline or another connection failure. Elapsed time alone does not identify the cause.
 
@@ -14,7 +14,7 @@ The initial diagnostics scope excludes live questions, uploads and extra usage. 
 
 ## Shipped: attachment and click diagnostics
 
-Commit `2eeefce` shipped the shared `BrowserConnection.get()` diagnostic changes:
+Commit `a224aa3` shipped the shared `BrowserConnection.get()` diagnostic changes:
 
 - Flushes one fixed, private-data-free notice to stderr immediately before a new CDP attachment, without progress records in the JSON command stream or a repeated notice on reuse. Whether Copilot displays streamed stderr before command completion remains a host-side check.
 - Includes `attachment_phase` and the configured `attachment_timeout_ms` in sanitized failure JSON. It distinguishes `runtime_startup` from `browser_attachment` without claiming an approval, denial or detailed WebSocket phase. Elapsed time still includes startup; the configured timeout applies only to the CDP call.
@@ -22,9 +22,9 @@ Commit `2eeefce` shipped the shared `BrowserConnection.get()` diagnostic changes
 
 Files: `utils/rovo_backend.py`, `tests/test_session.py`, both README copies, `docs/COPILOT_SETUP_PROMPT.md`, and `tests/TEST.md`. Three offline regressions cover notice ordering/flush/reuse and the two failure phases through the existing session interface.
 
-Commit `c9f380a` subsequently routed clicks through `click_control`, reporting private-safe control/reason/timeout diagnostics without retries. Commit `7de0fbc` fixes the reproduced narrow-window startup failure by leaving Show more open through the Ask Rovo click, with final cleanup preserved. Its installed suite passed 249 tests and startup plus another status passed in narrow normal Chrome. No questions were sent for the fix; the existing two-turn request record was unchanged. [Current validation](VALIDATION.md#current-development-baseline-2026-10-23)
+Commit `7c5f895` subsequently routed clicks through `click_control`, reporting private-safe control/reason/timeout diagnostics without retries. Commit `41ca8de` fixes the reproduced narrow-window startup failure by leaving Show more open through the Ask Rovo click, with final cleanup preserved. Its installed suite passed 249 tests and startup plus another status passed in narrow normal Chrome. No questions were sent for the fix; the existing two-turn request record was unchanged. [Current validation](VALIDATION.md#current-development-baseline-2026-10-23)
 
-Earlier in the same day's acceptance work, three authorized questions verified empty-screen creation, an existing-chat-to-new-chat switch and automatic second-turn continuation after CLI restart. Distinct/same IDs, exports and saved signatures established the expected boundaries. Those send checks ran at `c9f380a`; the final overflow fix was verified offline and with read-only status. Copilot-host, mini-modal-send and grounded-retrieval acceptance remain open.
+Earlier in the same day's acceptance work, three authorized questions verified empty-screen creation, an existing-chat-to-new-chat switch and automatic second-turn continuation after CLI restart. Distinct/same IDs, exports and saved signatures established the expected boundaries. Those send checks ran at `7c5f895`; the final overflow fix was verified offline and with read-only status. Copilot-host, mini-modal-send and grounded-retrieval acceptance remain open.
 
 ## Next gate: reuse across skill invocations
 
@@ -74,7 +74,7 @@ Offline success establishes the diagnostic behavior, not cross-invocation host p
 
 The isolated installed diagnostics candidate passed all **164 offline tests**, including the three new regressions. Tests ran outside the checkout with installed-command enforcement. All 12 packaged files matched source, all three documentation/skill mirror pairs matched, both command names passed `doctor`, and `git diff --check` passed. The working installation was unchanged. Build metadata, build output, the isolated install and test scratch were removed; wheel, logs and verification receipts remain outside Git.
 
-The attachment diagnostics were committed and pushed in `2eeefce`; later shipped fixes and their current counts are summarized above. Copilot-host installation and live acceptance remain pending. Official-access verification precedes new bridge infrastructure; a service or timeout change still depends on the Copilot evidence above.
+The attachment diagnostics were committed and pushed in `a224aa3`; later shipped fixes and their current counts are summarized above. Copilot-host installation and live acceptance remain pending. Official-access verification precedes new bridge infrastructure; a service or timeout change still depends on the Copilot evidence above.
 
 ### Local live diagnostic observation
 

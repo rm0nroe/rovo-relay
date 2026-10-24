@@ -6,7 +6,7 @@ Remaining work for `main` (package `0.1.0a6`). Details and evidence live in [Val
 
 Owner-run Copilot host checks are tracked outside this repository. Check 2 asks whether the host keeps one session process alive.
 
-## Speed work (architecture review, candidate 1 shipped in `5299567`)
+## Speed work (architecture review, candidate 1 shipped in `cab2512`)
 
 Measured baseline after candidate 1, one retained session on the development Mac, in seconds:
 
@@ -24,7 +24,7 @@ Measured baseline after candidate 1, one retained session on the development Mac
 
 ## Unverified or not implemented
 
-- Cause of the original post-readiness pre-submit click timeout (diagnostics shipped in `c9f380a`; not reproduced). Clicks whose input the page never acknowledges now report `input_not_acknowledged`, which narrows the next occurrence.
+- Cause of the original post-readiness pre-submit click timeout (diagnostics shipped in `7c5f895`; not reproduced). Clicks whose input the page never acknowledges now report `input_not_acknowledged`, which narrows the next occurrence.
 - Mini-modal ask, list and export (blocked by `rovo_layout_unverified`).
 - Grounded GitHub retrieval and structured citations.
 - MCP fallback in a real Copilot session.
