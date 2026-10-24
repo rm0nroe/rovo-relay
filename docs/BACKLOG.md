@@ -27,7 +27,6 @@ Development Mac, one retained session, in seconds. "Before" is the baseline afte
 
 ## Unverified or not implemented
 
-- Recurrence of `Click timed out: Show more` at startup: seen again once on 2026-10-24 during a status-only run on the narrow window, before any submission. Not reproduced since.
 - Long-term stability of the send-request URL used for new-chat capture. A change disables capture safely (`continuity_status: unavailable`), not delivery.
 - Cause of the original post-readiness pre-submit click timeout (diagnostics shipped in `7c5f895`; not reproduced). Clicks whose input the page never acknowledges now report `input_not_acknowledged`, which narrows the next occurrence.
 - Mini-modal ask, list and export (blocked by `rovo_layout_unverified`).
