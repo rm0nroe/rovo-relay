@@ -5,9 +5,10 @@ from unittest.mock import MagicMock
 from itertools import count
 
 import pytest
+from contextlib import contextmanager
 from playwright.sync_api import Browser, Error, Locator, Page, TimeoutError
 
-from cli_anything.rovo.core.state import read_request, state_dir
+from cli_anything.rovo.core.state import load_images, read_request, state_dir
 from cli_anything.rovo.utils import rovo_backend
 
 ORIGIN = "https://example.atlassian.net"
@@ -108,10 +109,15 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     panel.get_by_role.side_effect = lambda role, name=None, **kw: (
         textbox if role == "textbox" else welcome if role == "heading" and name.search("How can I help, Fixture?")
         else attachments if not isinstance(name, str)
-        else {"Stop generating": stop, "Submit": submit, "New chat": new_chat,
-              "Search conversations...": search, "Menu": menu, "View all conversations": all_chats,
-              "Go back to Rovo chat": back}[name]
+        else named(name)
     )
+    # Upload chips are named after each file; tests may preseed one to change its behavior.
+    add, upload = MagicMock(spec=Locator), MagicMock(spec=Locator)
+    chips = {}
+    named = lambda name: chips.setdefault(name, MagicMock(spec=Locator)) if name.startswith("Remove file ") or name.endswith(" PNG") else {
+        "Stop generating": stop, "Submit": submit, "New chat": new_chat, "Add": add,
+        "Search conversations...": search, "Menu": menu, "View all conversations": all_chats,
+        "Go back to Rovo chat": back}[name]
     roots = {}
     for test_id in (PANEL, MINI_PANEL):
         root = panel if test_id == layout else MagicMock(spec=Locator)
@@ -124,14 +130,28 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     launcher.is_enabled.return_value = True
     launcher.click.side_effect = lambda **kw: panel.is_visible.__setattr__("return_value", True)
     page.get_by_role.side_effect = lambda role, name, **kw: {
-        ACCOUNT: identity, "Show more": more, "Ask Rovo": launcher,
+        ACCOUNT: identity, "Show more": more, "Ask Rovo": launcher, "Upload file": upload,
     }[name]
+    chooser = page.expect_file_chooser.return_value.__enter__.return_value
     return SimpleNamespace(page=page, panel=panel, roots=roots, submit=submit,
                            textbox=textbox, stop=stop, attachments=attachments,
                            responses=responses, groups=groups, welcome=welcome,
                            status=status, new_chat=new_chat, launcher=launcher, identity=identity,
                            rows=rows, row=row, content=content, user=user, message=message,
-                           search=search, more=more, menu=menu, back=back, sends=sends, listeners=listeners)
+                           search=search, more=more, menu=menu, back=back, sends=sends, listeners=listeners,
+                           add=add, upload=upload, chips=chips, chooser=chooser)
+
+
+def owned_context(pages, page):
+    # new_page counts and supplies the tabs the backend opens through its own CDP window.
+    context = SimpleNamespace(pages=pages, new_page=MagicMock(return_value=page))
+
+    @contextmanager
+    def expect_page():
+        yield SimpleNamespace(value=context.new_page())
+
+    context.expect_page = expect_page
+    return context
 
 
 @pytest.fixture
@@ -142,7 +162,8 @@ def run_browser(monkeypatch, tmp_path):
     def run(target=None, *, existing=(), **kwargs):
         browser = MagicMock(spec=Browser)
         target = target or page_fixture(ORIGIN + "/jira/for-you", panel_open=False)
-        browser.contexts = [SimpleNamespace(pages=[f.page for f in existing], new_page=MagicMock(return_value=target.page))]
+        browser.contexts = [owned_context([f.page for f in existing], target.page)]
+        run.browser = browser
         runtime = MagicMock()
         runtime.__enter__.return_value.chromium.connect_over_cdp.return_value = browser
         monkeypatch.setattr(rovo_backend, "sync_playwright", lambda: runtime)
@@ -259,6 +280,37 @@ def test_navigation_after_submit_keeps_uncertainty_and_never_reselects(run_brows
     result, code = rovo_backend.operate(ORIGIN, "another-session", ACCOUNT, prompt=PROMPT)
     assert code == 4 and result["retry_safe"] is False
     target.submit.click.assert_called_once()
+
+
+def synthetic_pngs(tmp_path, *names):
+    for name in names:
+        (tmp_path / name).write_bytes(b"\x89PNG\r\n\x1a\nsynthetic")
+    return load_images([tmp_path / name for name in names])
+
+
+def test_ask_uploads_each_png_in_order(run_browser, tmp_path):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1")
+    images = synthetic_pngs(tmp_path, "first.png", "second.png")
+    result, code = run_browser(target, prompt=PROMPT, images=images)
+    assert code == 0 and result["image_count"] == 2, result
+    assert target.add.click.call_count == 2 and target.upload.click.call_count == 2
+    assert [c.args[0]["name"] for c in target.chooser.value.set_files.call_args_list] == ["first.png", "second.png"]
+    assert list(target.chips) == ["Remove file first.png", "first PNG", "Remove file second.png", "second PNG"]
+    for chip in target.chips.values():
+        chip.wait_for.assert_called_once_with(state="visible", timeout=30000)
+    target.submit.click.assert_called_once()
+
+
+def test_unconfirmed_upload_never_submits(run_browser, tmp_path):
+    target = page_fixture(ORIGIN + "/browse/DEMO-1")
+    target.chips["Remove file first.png"] = MagicMock(spec=Locator)
+    target.chips["Remove file first.png"].wait_for.side_effect = TimeoutError("Locator.wait_for: Timeout 30000ms exceeded.")
+    result, code = run_browser(target, prompt=PROMPT, images=synthetic_pngs(tmp_path, "first.png"))
+    assert code == 1, result
+    assert result["submission_state"] == "not_attempted" and result["retry_safe"] is True
+    target.chooser.value.set_files.assert_called_once()
+    target.submit.click.assert_not_called()
+    assert not list(tmp_path.rglob("request.json"))
 
 
 def test_completion_is_awaited_in_page_not_by_polling(run_browser):
@@ -583,6 +635,19 @@ def test_navigation_while_waiting_stops_preparation(run_browser):
     target.submit.click.assert_not_called()
     target.page.reload.assert_not_called()
     target.page.close.assert_not_called()
+
+
+def test_owned_tab_opens_offscreen_in_its_own_background_window(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    assert run_browser(target)[1] == 0
+    cdp = run_browser.browser.new_browser_cdp_session.return_value
+    calls = [c.args for c in cdp.send.call_args_list]
+    assert calls[0] == ("Target.createTarget", {"url": "about:blank", "newWindow": True, "background": True})
+    bounds = next(args[1]["bounds"] for args in calls if args[0] == "Browser.setWindowBounds")
+    # Minimized pages are hidden and pause animation frames, so clicks would time out.
+    assert bounds["left"] < 0 and (bounds["width"], bounds["height"]) == (1440, 900) and "windowState" not in bounds
+    cdp.detach.assert_called_once()
+    target.page.goto.assert_called_once()
 
 
 def test_only_verified_empty_owned_legacy_tab_is_closed(run_browser):

@@ -175,3 +175,12 @@ def test_other_destinations_still_stop_preparation(run_browser, url):
     result, code = run_browser(target)
     assert code == 1 and "left the requested Jira site" in result["message"], result
     assert url not in json.dumps(result)
+
+
+def test_click_timeout_on_hidden_page_names_the_cause(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.new_chat.click.side_effect = TimeoutError("Locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for element to be visible, enabled and stable\n")
+    target.new_chat.page.evaluate.return_value = "hidden"
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and result["click_diagnostics"] == {"control": "New chat", "reason": "page_hidden", "timed_out": True}
+    target.textbox.fill.assert_not_called()

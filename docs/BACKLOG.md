@@ -32,5 +32,5 @@ macOS, one retained session, in seconds. "Before" is the baseline after candidat
 - Mini-modal ask, list and export (blocked by `rovo_layout_unverified`).
 - Grounded GitHub retrieval and structured citations.
 - MCP fallback in a real Copilot session.
-- Multiple images, upload error variants, older history pagination, uncertain-delivery reconciliation, other operating systems, headless operation.
+- More than two images, upload error variants, older history pagination, uncertain-delivery reconciliation, other operating systems, headless operation.
 - Token and billing savings measured in Copilot (current figures are byte estimates).
