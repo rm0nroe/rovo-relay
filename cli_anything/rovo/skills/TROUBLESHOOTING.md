@@ -4,7 +4,7 @@ Read when a result has `next: stop` for a connection, setup or layout error, or 
 
 ## Chrome attachment
 
-The direct route's supported prerequisite is Chrome 144+ with explicit enablement at `chrome://inspect/#remote-debugging` in the same OS/user environment as the CLI; the user approves the browser prompt. Do not fabricate DevToolsActivePort or add launch flags as a workaround. Multiple Chrome contexts are rejected because the approved profile is ambiguous.
+The direct route's supported prerequisite is Chrome 144+ with explicit enablement at `chrome://inspect/#remote-debugging` in the same OS/user environment as the CLI; the browser prompt must be approved. The owner-authorized macOS route uses `--approve-chrome-prompt --chrome-port PORT`; other routes retain manual approval. Do not fabricate DevToolsActivePort or add launch flags as a workaround. Multiple Chrome contexts are rejected because the approved profile is ambiguous.
 
 If remote debugging is enabled but file discovery fails, use global `--chrome-port PORT` before `session` only when Chrome's debugging UI advertises that port or local process ownership proves it belongs to the intended normal Chrome. The connector uses a fixed loopback WebSocket, preserves Chrome approval and freezes the port for the connection. Do not guess ports, change profiles, fabricate discovery files or automatically switch endpoints after a failed attachment. Missing discovery is not proof debugging is disabled. One-shot commands accept the same global option.
 
@@ -12,13 +12,25 @@ If remote debugging is enabled but file discovery fails, use global `--chrome-po
 
 For a user-confirmed managed Chrome connection block, the MCP fallback is allowed only after this invocation's status failed before submission with `not_attempted` and `retry_safe: true`. Configuration checks must establish the MCP route is independently permitted; never infer this just from tool presence.
 
+### Guarded macOS approval
+
+The CLI bundles `utils/allow.sh` and `chrome_approval.py` in its installed package, so no separate skill or browser extension is needed. The click sequence was verified on Chrome 155.0.8059.85. Check `doctor` for `guarded Chrome prompt approval`; an older build with the same version may lack it.
+
+Dependencies: `/usr/bin/python3` with Quartz, `/opt/homebrew/bin/cliclick`, native `lsof`/`ps`/`osascript`, and Accessibility/Automation permissions for the launching terminal. Keep Chrome visible and the keyboard/pointer idle; approval changes the frontmost app and pointer for about two seconds. Do not install dependencies, grant permissions or change policy silently.
+
+The connector starts the helper before attachment. Preflight requires exactly one normal Chrome loopback listener, no debugging clients and no existing debugging prompts. While attachment is pending, the helper requires exactly one local socket pair whose client belongs to this CLI’s process tree, and exactly one new dialog owned by that Chrome process. After letting the sheet appear, it refreshes the bounds of that same window before parking the pointer. It rechecks socket ownership and the dialog’s window ID/bounds immediately before one down/up click. Movement after pointer placement, a replacement window, another client, another prompt, missing dependency or permission error stops approval. Existing prompts are never cancelled or approved. Stop other browser automation during attachment: Chrome provides no client identity in its dialog, and these local checks cannot prevent an unrelated program racing the final check and click.
+
+A helper failure returns `chrome_approval_failed`, `next: stop`, and the existing delivery/retry state; a fresh pre-submission failure remains `not_attempted` / `retry_safe: true`. It does not authorize retrying the ask, rerunning an unguarded helper or using MCP. The helper has a 17-second prompt wait within the 20-second CDP attachment budget; preflight and final verification each have a separate 5-second bound. Failed attachment stops only the helper/processes this invocation started. An ordinary attachment failure remains `chrome_connection_failed`; pending approval is only a possible cause.
+
+`RemoteDebuggingAllowed=false` prevents attachment without a prompt. If the target’s actual policy reports that value, report a policy block, not a failed Allow click; never change policy or use a replacement profile. The presence of a prompt is not evidence that debugging is disabled.
+
 ## Owned tab
 
 Failed clicks include `click_diagnostics` with a fixed `control` label, `timed_out`, and `reason` (the last recognized Playwright blocker, or `unknown`). Reasons include `not_visible`, `not_enabled`, `not_stable`, `outside_viewport`, `detached`, `pointer_events_intercepted`, `locator_not_resolved`, `multiple_matches`, `target_closed`, and `navigation_pending` (the click finished, but navigation did not). Labels never include chat titles or IDs; raw locators, page text, HTML, URLs and call logs are not returned. These diagnostics do not authorize retrying or establish a Chrome approval problem. A click failure during continuity capture preserves the completed answer and reports the same diagnostics with `continuity_status: unavailable`.
 
 The direct CLI creates one tab in the existing approved Chrome context at the requested site's `/jira/for-you`; no Jira tab or pre-opened Rovo panel is required. It checks the account, opens Ask Rovo once if absent, and waits up to 10 seconds for the panel/composer after navigation (separately bounded to 10 seconds). Keep all existing user tabs and drafts intact. The same connection reuses its bound tab even when other Rovo panels open. If its tab closes, replacement is allowed only after the unresolved-delivery guard passes; a tab navigated outside Jira is rejected without refresh. Never manually refresh, close user panels or switch targets to evade a guard. Inspect `readiness_phase` on preparation failure. There is no automatic reload or submission retry.
 
-At exit the CLI closes only its own verified empty idle legacy tab after status; conversation content, drafts, uncertain delivery, failed preparation and unverified layouts retain the tab with a stderr notice. There is no daemon, automatic reconnect or approval bypass.
+At exit the CLI closes only its own verified empty idle legacy tab after status; conversation content, drafts, uncertain delivery, failed preparation and unverified layouts retain the tab with a stderr notice. There is no daemon, automatic reconnect or disabled approval protection. The opt-in helper performs the one authorized Allow click; it does not persist permission.
 
 ## Mini-modal layout
 

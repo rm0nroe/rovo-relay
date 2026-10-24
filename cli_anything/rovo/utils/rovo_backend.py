@@ -9,6 +9,7 @@ from hashlib import sha256
 import json
 
 from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
+from cli_anything.rovo.utils.chrome_approval import ApprovalError, ChromeApproval
 
 from cli_anything.rovo.core.state import (
     blocking_request, bounded_answer, completed_turn, read_request, save_request, site_lock, state_dir, unresolved,
@@ -18,8 +19,9 @@ from cli_anything.rovo.core.state import (
 class BrowserConnection:
     """Own one lazy CDP attachment; an attempted connection is never retried."""
 
-    def __init__(self, chrome_port=None):
+    def __init__(self, chrome_port=None, approve_chrome_prompt=False):
         self.chrome_port = chrome_port
+        self.approve_chrome_prompt = approve_chrome_prompt
         self.browser = None
         self.runtime = None
         self.attempted = False
@@ -38,20 +40,34 @@ class BrowserConnection:
             self.attempted = True
             started = time.monotonic()
             phase = "runtime_startup"
+            approval = None
             try:
                 self.runtime = sync_playwright()
                 pw = self.runtime.__enter__()
                 # Approval-mode Chrome can listen without a discovery file or JSON endpoint.
                 endpoint = f"ws://127.0.0.1:{self.chrome_port}/devtools/browser" if self.chrome_port else "chrome"
+                if self.approve_chrome_prompt:
+                    phase = "chrome_approval"
+                    approval = ChromeApproval(self.chrome_port)
+                    approval.start()
                 phase = "browser_attachment"
-                print("Connecting to Chrome (20-second attachment timeout). If Chrome asks, approve the connection.",
+                notice = ("Guarded approval enabled for this connection only; the pointer and foreground app may move."
+                          if approval else "If Chrome asks, approve the connection.")
+                print("Connecting to Chrome (20-second attachment timeout). " + notice,
                       file=sys.stderr, flush=True)
                 self.browser = pw.chromium.connect_over_cdp(endpoint, timeout=20000, no_defaults=True)
+                if approval:
+                    phase = "chrome_approval"
+                    approval.finish()
             except (Exception, KeyboardInterrupt) as error:
                 self.failed = True
+                if approval and not isinstance(error, (ApprovalError, KeyboardInterrupt)):
+                    error = approval.failure() or error
+                approval_failed = isinstance(error, ApprovalError) or phase == "chrome_approval"
                 missing = isinstance(error, PlaywrightError) and "DevToolsActivePort file not found" in str(error)
                 self.diagnostics = {
-                    "error_code": "chrome_debugging_unavailable" if missing else "chrome_connection_failed",
+                    "error_code": ("chrome_approval_failed" if approval_failed else
+                                   "chrome_debugging_unavailable" if missing else "chrome_connection_failed"),
                     "attachment_elapsed_ms": round((time.monotonic() - started) * 1000),
                     "attachment_phase": phase,
                     "attachment_timeout_ms": 20000,
@@ -59,15 +75,28 @@ class BrowserConnection:
                         "Use Chrome 144+ in the same OS and user environment as this CLI; WSL, containers and remote terminals do not automatically discover host Chrome.",
                         "In that Chrome, open chrome://inspect/#remote-debugging and explicitly enable remote debugging if permitted by your organization.",
                         "Enabled debugging can lack a discovery file. If Chrome advertises a port, or its ownership by the intended local Chrome is verified, pass --chrome-port PORT; do not guess a port.",
-                        "Keep Chrome visible and approve its connection prompt yourself within the 20-second attachment window. Pending approval is one possible cause, not a confirmed diagnosis.",
+                        ("Keep Chrome visible; the guarded helper handles only this connection. Do not run another helper or repeat the ask."
+                         if self.approve_chrome_prompt else
+                         "Keep Chrome visible and approve its connection prompt yourself within the 20-second attachment window. Pending approval is one possible cause, not a confirmed diagnosis."),
                         "If unavailable or still failing, report Chrome version/channel, CLI environment and whether the setting is managed; do not change policy or create a DevToolsActivePort file.",
                     ],
                 }
                 if isinstance(error, KeyboardInterrupt):
                     raise
-                message = ("Chrome debugging connection is unavailable: DevToolsActivePort file not found."
+                if approval_failed:
+                    self.diagnostics["next_steps"] = [
+                        "Leave other debugging prompts and clients alone. Do not rerun the helper or relaunch an ask.",
+                        "Check helper dependencies, permissions and exclusive Chrome availability before a separately authorized read-only status.",
+                        "If RemoteDebuggingAllowed is false, report a policy block; never change policy or switch endpoints.",
+                    ]
+                message = (str(error) if isinstance(error, ApprovalError) else
+                           "Chrome approval helper could not run; no prompt was submitted." if approval_failed else
+                           "Chrome debugging connection is unavailable: DevToolsActivePort file not found."
                            if missing else "Chrome connection failed; inspect the browser and sanitized next_steps.")
                 raise ValueError(message) from error
+            finally:
+                if approval:
+                    approval.close()
         self.check()
         return self.browser
 
@@ -275,7 +304,7 @@ def observed_ids(rows):
 
 
 def operate(origin, session, account, prompt=None, timeout=180, images=(), github_source=None,
-            chat_id=None, action="status", connection=None, chrome_port=None, new=False):
+            chat_id=None, action="status", connection=None, chrome_port=None, new=False, approve_chrome_prompt=False):
     allowed_prefixes = (origin + "/jira/", origin + "/browse/")
     directory = state_dir(Path.home(), origin, session)
     record = {"request_id": str(uuid4()), "site": origin, "account": account, "chat_id": chat_id,
@@ -312,7 +341,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("No verified conversation binding for this session/account. Use --new or an observed --chat UUID.") from None
                 record["chat_id"] = chat_id
             base["conversation_mode"] = "continued" if chat_id else "new"
-            with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port)) as owner:
+            with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port, approve_chrome_prompt)) as owner:
                 page = owner.target(origin, session, account)
                 lap("attach")
                 owner.cleanable.discard(page)
