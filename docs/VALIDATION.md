@@ -1,5 +1,13 @@
 # Validation status
 
+## Verified timeout partial answer (2026-10-24)
+
+A follow-up that timed out reported the previous turn's answer as `partial_answer` (seen live twice). The in-page read took the answer from the panel's last answer card. Rovo renders the new turn's group, with its message ID, before that turn's own card, so the last card was still the previous answer. The read now takes the last group's own cards, as the turn signature already did. A snapshot whose last group is not yet this turn (no new count or message ID, or another prompt) reports no partial answer. Completion is unchanged: it already required a new turn and a matching prompt.
+
+Live, installed candidate, 2 questions. On the first candidate, which only had the Python-side guard, a timed-out `--chat` follow-up still returned the previous answer; that is how the card-less new group was found. On the final candidate, the same kind of follow-up with `--timeout 1` exited 3 with `partial_answer` empty, and `reconcile` then proved and returned the real answer. `status` was then unblocked.
+
+Offline: 378 passed and 16 opt-in skipped; 394 passed with `ROVO_DOM_CHECK=1`; installed 378 with 16 skipped; 15 packaged files match.
+
 ## Verified multi-line prompts (2026-10-24)
 
 Any prompt with a line break was refused before Submit (`Target or draft changed before submission`, `not_attempted`, nothing sent). Rovo's editor turns each line of the filled text into a paragraph, so the composer's text gains blank lines (and a trailing break) and never equalled the prompt. The rendered turn shows the same blank lines, so completion and the turn signature would also have missed it. All of these comparisons now use one rule (`state.plain`): non-blank lines, spaces collapsed. That rule also covers the prompt hash and Rovo's stored text, where an ADF hard break now counts as a line break. A draft whose words changed is still refused.

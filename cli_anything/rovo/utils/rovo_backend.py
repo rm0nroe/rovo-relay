@@ -510,14 +510,14 @@ OBSERVE_TURN = """panel => {
   if (statuses.length > 1) throw new Error('Multiple Rovo status regions');
   const responses = all(panel, '[data-testid="assistant-response-card-layout"]');
   const groups = all(panel, '[data-testid="rovo-chat-message-group"]');
-  const last = responses[responses.length - 1];
   const user = groups.length ? groups[groups.length - 1].querySelector('.ak-renderer-document') : null;
   const ids = groups.length ? all(groups[groups.length - 1], '[data-message-id]') : [];
   return {
     status: statuses.length ? statuses[0].innerText : '',
     generating: all(panel, 'button, [role="button"]').some(el => label(el) === 'Stop generating' && visible(el)),
     count: responses.length,
-    answer: last ? all(last, '.ak-renderer-document').map(el => el.innerText).join('\\n') : '',
+    // This turn's own cards: until it renders one, the panel's last card is the previous answer.
+    answer: groups.length ? all(groups[groups.length - 1], '[data-testid="assistant-response-card-layout"] .ak-renderer-document').map(el => el.innerText).join('\\n') : '',
     group_count: groups.length,
     user_text: user ? user.innerText : '',
     last_id: ids.length === 1 ? ids[0].dataset.messageId : null,
@@ -804,12 +804,15 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             if not page.url.startswith(allowed_prefixes):
                                 raise ValueError("Browser left the expected site after submission.")
                             raise
-                        status, generating, answer = turn["status"], turn["generating"], turn["answer"]
+                        status, generating = turn["status"], turn["generating"]
+                        new_id = bool(turn.get("last_id")) and turn.get("last_id") not in old_ids
+                        prompt_matches = plain(turn["user_text"]) == plain(prompt)
+                        # Until this turn's group renders, the last group is the previous turn.
+                        answer = turn["answer"] if (turn["count"] > before or new_id) and prompt_matches else ""
                         started = started or turn["started"] or generating or status.strip() == "Rovo is thinking"
                         if completed_turn(started=started, count=turn["count"], status=status,
                                           generating=generating, answer=answer, before=before,
-                                          prompt_matches=plain(turn["user_text"]) == plain(prompt),
-                                          new_id=bool(turn.get("last_id")) and turn.get("last_id") not in old_ids):
+                                          prompt_matches=prompt_matches, new_id=new_id):
                             lap("generate")
                             record.update(execution_status="completed", submission_state="observed_submitted")
                             record["continuity_status"] = "unavailable"

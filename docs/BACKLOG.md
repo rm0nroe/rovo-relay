@@ -30,6 +30,7 @@ macOS, one retained session, in seconds. "Before" is the baseline after candidat
 12. **Long chats.** Fixed and live-verified to 30 turns. Rovo's panel is virtualized, so export, turn counts, completion and warm-tab reuse no longer rely on counting the page; they use Rovo's own message data and message IDs. See [Validation](VALIDATION.md#verified-long-chats-2026-10-24).
 13. **Guarded reconcile.** Shipped and live-verified on a new-chat timeout and a continued-chat timeout (2 questions). `reconcile` lifts this session's uncertain-delivery block only when Rovo's own message data shows the saved prompt exactly once after the earlier turns, with an answer; it never sends and otherwise changes nothing. See [Validation](VALIDATION.md#verified-guarded-reconcile-2026-10-24).
 14. **Multi-line prompts.** Fixed and live-verified (1 question). Any prompt with a line break was refused before Submit because Rovo's editor adds blank lines between paragraphs; the draft check, completion, turn signature and reconcile proof now compare normalized text. See [Validation](VALIDATION.md#verified-multi-line-prompts-2026-10-24).
+15. **Timeout partial answer.** Fixed and live-verified (2 questions). A timed-out follow-up reported the previous turn's answer as `partial_answer`; the in-page read now takes only the last message group's own cards. See [Validation](VALIDATION.md#verified-timeout-partial-answer-2026-10-24).
 
 ## Unverified or not implemented
 
