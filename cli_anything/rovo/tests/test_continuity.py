@@ -184,3 +184,53 @@ def test_changed_conversation_while_filling_never_submits(run_browser):
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and "changed before submission" in result["message"], result
     target.submit.click.assert_not_called()
+
+
+def count_reads(monkeypatch):
+    """Count idle checks and signature reads; the real functions still run."""
+    calls = {"require_idle": 0, "turn_signature": 0}
+    for name in calls:
+        def spy(*args, _name=name, _real=getattr(rovo_backend, name)):
+            calls[_name] += 1
+            return _real(*args)
+        monkeypatch.setattr(rovo_backend, name, spy)
+    return calls
+
+
+def test_automatic_picker_followup_reuses_verified_reads(run_browser, monkeypatch):
+    completed(run_browser)
+    calls = count_reads(monkeypatch)
+    result, code = run_browser(existing(), prompt=PROMPT)
+    assert code == 0 and result["chat_selection"] == "picker", result
+    # Before selection, at the end of opening the chat; history check, post-fill check, capture.
+    assert calls == {"require_idle": 2, "turn_signature": 3}
+
+
+def test_explicit_chat_skips_repeat_idle_check(run_browser, monkeypatch):
+    target = existing()
+    target.submit.click.side_effect = lambda: (setattr(target.responses.count, "return_value", 2),
+                                               setattr(target.groups.count, "return_value", 2))
+    calls = count_reads(monkeypatch)
+    result, code = run_browser(target, prompt=PROMPT, chat_id=CHAT)
+    assert code == 0 and result["continuity_status"] == "verified", result
+    assert calls == {"require_idle": 2, "turn_signature": 3}
+
+
+@pytest.mark.parametrize("click", [True, False])
+def test_new_chat_rechecks_idle_only_after_a_click(run_browser, monkeypatch, click):
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=not click)
+    target.new_chat.is_enabled.return_value = click
+    calls = count_reads(monkeypatch)
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 0 and result["answer"] == "Synthetic answer", result
+    assert calls == {"require_idle": 2 if click else 1, "turn_signature": 1}
+
+
+def test_draft_appearing_after_new_chat_click_is_still_blocked(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    clear = target.new_chat.click.side_effect
+    target.new_chat.click.side_effect = lambda: (clear(), setattr(target.textbox.evaluate, "return_value", "Unsent work"))
+    result, code = run_browser(target, prompt=PROMPT)
+    assert code == 1 and "Existing draft" in result["message"], result
+    target.textbox.fill.assert_not_called()
+    target.submit.click.assert_not_called()
