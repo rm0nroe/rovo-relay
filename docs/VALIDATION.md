@@ -1,5 +1,33 @@
 # Validation status
 
+## Current development baseline (2026-10-23)
+
+Source `7de0fbc`, package version `0.1.0a6`, passed **249 offline tests** against the installed command outside the checkout, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the venv executable directory on PATH. The installed backend matched source byte-for-byte and `git diff --check` passed. An initial invocation had 10 subprocess failures because PATH omitted the CLI; the corrected invocation passed all tests. A normal isolated `pip install --no-deps .` build succeeded with the declared build requirements; the older offline fallback described below is historical.
+
+The following live scenarios passed on `c9f380a` in normal signed-in Chrome. They used three separately authorized questions in total, with no submission retries; read-only exports and saved records supplied the verification:
+
+| Scenario | Additional questions | Verified result |
+|---|---|---|
+| New chat from an empty welcome screen | 1 | Exact synthetic reply; captured and reopened new ID; one turn; export and saved signature matched |
+| Existing conversation to `ask --new` | 1 | Enabled New chat path; distinct new ID with one turn; original conversation unchanged |
+| Second turn after CLI restart and owned-tab closure | 1 | Plain `ask` with no `--chat` or `--new` reused the saved ID; two turns with the first unchanged; reply used the prior token without repeating it in the follow-up prompt |
+
+The restart test first encountered a pre-submit startup failure, `Ask Rovo (detached)`. After user-approved restart and window expansion, continuity passed. Subsequent read-only investigation reproduced the narrow-window failure: account verification dismissed Show more before clicking the launcher inside it. Commit `7de0fbc` removes that premature dismissal while retaining final menu cleanup and all identity/delivery checks. Its regression failed before the fix; fresh installed startup and another status then passed at the narrow layout without resizing. **No questions were sent after this readiness fix.**
+
+Commit `c9f380a` added private-safe `click_diagnostics` with a fixed control label, allowlisted reason and timeout flag. The reproduced startup failure verified those diagnostics live. The earlier post-readiness pre-submit timeout still lacks its original detailed call log and remains unidentified; it must not be attributed to this startup bug. No automatic click or submission retry was added.
+
+Task-owned diagnostic processes, tabs and build scaffolding were removed; synthetic conversations and request evidence remain private outside Git. These results accept the measured local paths only. Copilot acceptance, grounded retrieval and mini-modal sends remain open. See [the testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure. Earlier sections below retain their candidate-specific historical counts and limits.
+
+## Automatic conversation continuity (2026-10-23)
+
+Commit `0445e91` adds automatic conversation binding for the same site/session/account, explicit `--new`, verified capture from loaded picker IDs and history checks before follow-up. The final installed candidate passed 205 offline tests outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`; all 12 installed files and three documentation mirror pairs matched source. Use the [development testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure.
+
+Three authorized synthetic turns completed in the owner's normal signed-in Chrome with the same captured conversation ID and visible turn counts of one, two and three. No follow-up supplied `--chat`. The second turn reused the foreground connection; the third used a fresh installed process and reopened the saved chat. The final pre-submit history and persistence refinements were verified offline after these live requests, not by another live submission. The exact pinned isolated build remained unavailable; the wheel used existing setuptools 84.0.0 and wheel 0.48.0.
+
+The initial synthetic “remember” wording unexpectedly created a Rovo memory despite instructions not to use tools. The owner approved removal of that exact test entry; the empty memory list verified deletion. Both disposable test tabs and build scaffolding were removed, while user tabs and chat/request evidence were preserved. Future continuity probes avoid “remember” wording and explicitly prohibit memory writes; a correct marker alone never establishes same-chat continuity.
+
+This earlier run accepted the measured local flows, subject to the final-refinement limit above; the current-baseline checks now add later live evidence. Copilot acceptance, grounded retrieval and mini-modal sends remain open. New-chat capture is bounded to loaded picker rows and stops implicit continuation when its identity/history proof is missing or ambiguous.
+
 ## Tab and readiness candidate (local, 2026-10-22)
 
 The existing CLI now creates and binds its own tab in the approved normal Chrome context, opens Ask Rovo and waits for account/panel/composer readiness. It does not inspect or select user-owned Rovo tabs, reload pages, retry submissions or add a browser/dependency. A closed owned tab is replaced only after the existing site-wide unresolved-delivery check. Live testing exposed stale Playwright close events while stdin was idle; draining pending events before checking the bound tab fixed that case, with an offline regression.
@@ -57,9 +85,9 @@ These checks used incremental installs on macOS. The final development build als
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, new-chat ID capture, structured citations, multiple-image live tests, upload error variants, older history pagination, uncertain-delivery reconciliation, actual Copilot invocation, other operating systems, headless operation and measured token savings remain unverified or unimplemented.
+Grounded GitHub retrieval, structured citations, multiple-image live tests, upload error variants, older history pagination, uncertain-delivery reconciliation, actual Copilot invocation, other operating systems, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
-Live calls consume Rovo credits. The development allowance was exhausted; no further Rovo prompts are part of the repository preparation. A finished CLI response is not a passing code-retrieval result.
+Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 
 ## Chrome connection diagnostic regression
 
