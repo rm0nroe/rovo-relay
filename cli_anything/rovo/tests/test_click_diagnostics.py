@@ -1,5 +1,6 @@
 """Click failures expose fixed labels and reasons, never Playwright page content."""
 import json
+from itertools import count
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ PRIVATE = 'secret@example.com /private/profile https://example.com/?token=secret
     ("element was detached from the DOM, retrying", "detached"),
     (f'<div title="{PRIVATE}">private content</div> intercepts pointer events', "pointer_events_intercepted"),
     ("unrecognized reason " + PRIVATE, "unknown"),
+    ("performing click action", "input_not_acknowledged"),
 ])
 def test_click_timeout_only_emits_allowlisted_reason(run_browser, log, reason, capsys):
     target = page_fixture(ORIGIN + "/jira/for-you")
@@ -89,6 +91,8 @@ def test_capture_click_failure_keeps_completed_answer_and_safe_diagnostics(run_b
     (TimeoutError('Timeout\n  - waiting for element to be visible, enabled and stable'), "unknown"),
     (TimeoutError('Locator.click: Timeout 10ms exceeded.\nCall log:\n  - element is not visible\n  - element is not enabled'), "not_enabled"),
     (TimeoutError('Timeout\n  - element is not visible\n  - click action done'), "unknown"),
+    (TimeoutError('Timeout\n  - locator resolved to <button>x</button>\n  - done scrolling\n  - performing click action'), "input_not_acknowledged"),
+    (TimeoutError('Timeout\n  - performing click action\n  - click action done'), "unknown"),
     (TimeoutError('Timeout\n  - element is not visible\n  - click action done\n  - waiting for scheduled navigations to finish'), "navigation_pending"),
 ])
 def test_other_click_failures_and_last_reported_reason(error, reason):
@@ -119,3 +123,67 @@ def test_click_diagnostics_do_not_persist_into_later_results(run_browser):
     target.new_chat.click.side_effect = TimeoutError('Timeout')
     assert "click_diagnostics" in run_browser(target, prompt=PROMPT)[0]
     assert "click_diagnostics" not in run_browser()[0]
+
+
+IDENTITY = "https://id.atlassian.com/join/user-access?continue=" + PRIVATE.replace(" ", "%20")
+BUSY = 'Locator.click: Timeout 10000ms exceeded.\nCall log:\n  - locator resolved to <button>x</button>\n  - performing click action'
+
+
+def test_show_more_click_lost_to_sign_in_bounce_reports_authentication(run_browser, tmp_path):
+    """Jira busy with an Atlassian sign-in bounce is a not-ready state, not a click failure."""
+    target = page_fixture(ORIGIN + "/jira/for-you", panel_open=False, authenticated=False)
+    more = target.page.get_by_role("button", name="Show more", exact=True)
+    more.is_visible.return_value = True
+
+    def bounce(**kw):
+        target.page.url = IDENTITY
+        raise TimeoutError(BUSY)
+
+    more.click.side_effect = bounce
+    result, code = run_browser(target)
+    assert code == 2 and result["execution_status"] == "authentication_required", result
+    assert result["readiness_phase"] == "account" and result["page_scope"] == "atlassian_identity"
+    assert result["retry_safe"] is True and "click_diagnostics" not in result
+    more.click.assert_called_once()
+    target.page.keyboard.press.assert_not_called()
+    target.launcher.click.assert_not_called()
+    target.textbox.fill.assert_not_called()
+    target.page.reload.assert_not_called()
+    assert not list(tmp_path.rglob("request.json"))
+    for secret in PRIVATE.split():
+        assert secret not in json.dumps(result)
+
+
+@pytest.mark.parametrize("returns", [True, False])
+def test_sign_in_bounce_is_waited_out_without_touching_the_page(run_browser, returns):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    page = target.page
+    page.goto.side_effect = lambda *a, **kw: setattr(page, "url", IDENTITY)
+    waits = count()
+
+    def wait(ms):
+        if returns and next(waits) == 3:
+            page.url = ORIGIN + "/jira/for-you"
+
+    page.wait_for_timeout.side_effect = wait
+    result, code = run_browser(target)
+    if returns:
+        assert code == 0 and result["readiness_phase"] == "ready", result
+    else:
+        assert code == 2 and result["execution_status"] == "authentication_required", result
+        assert result["page_scope"] == "atlassian_identity"
+    page.goto.assert_called_once()
+    page.reload.assert_not_called()
+    page.keyboard.press.assert_not_called()
+    target.launcher.click.assert_not_called()
+    target.page.get_by_role("button", name="Show more", exact=True).click.assert_not_called()
+
+
+@pytest.mark.parametrize("url", ["https://id.atlassian.com.evil.test/login", "http://id.atlassian.com/login",
+                                 "https://other.atlassian.net/jira/for-you"])
+def test_other_destinations_still_stop_preparation(run_browser, url):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.page.goto.side_effect = lambda *a, **kw: setattr(target.page, "url", url)
+    result, code = run_browser(target)
+    assert code == 1 and "left the requested Jira site" in result["message"], result
+    assert url not in json.dumps(result)
