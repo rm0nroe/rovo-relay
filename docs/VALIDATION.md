@@ -1,5 +1,18 @@
 # Validation status
 
+## Startup `Click timed out: Show more` explained (2026-10-24)
+
+Neither occurrence is a CLI bug, and no code changed. The first was an Atlassian sign-in bounce during startup, fixed in `c9fc27d`. The second ran under a private network-capture harness that read every response body inside Playwright event handlers. Its recording went silent for about 6 seconds, ending when the click's 10-second readiness budget ran out.
+
+Five fresh status-only startups on the narrow window, with no questions sent, isolated the cause:
+
+| Run | Show more click | `prepare` |
+|---|---:|---:|
+| Plain CLI (3 runs) | 43 to 173 ms | 1.2 to 1.4 s |
+| Same CLI plus body reads in a response handler (2 runs) | 462 to 502 ms | 5.4 to 5.6 s |
+
+All five passed and closed their own tabs. Blocking body reads slow readiness about fourfold, and one body that never finishes (seen in the same harness) stalls past the deadline. Test harnesses must not read response bodies synchronously in event handlers during startup.
+
 ## Verified pre-send read dedupe (2026-10-24)
 
 Before sending, the CLI no longer repeats reads it has just taken. The idle check (composer, draft, attachments, active response) runs again only after a click it has not already checked, and the conversation signature verified during chat selection is reused instead of read again. Every check after the prompt is filled still runs.
