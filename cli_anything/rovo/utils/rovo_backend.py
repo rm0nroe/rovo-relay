@@ -247,7 +247,13 @@ def owned_window_page(browser):
 def answered(panel, record):
     """The tab shows exactly the last verified answer, so the saved chat holds everything."""
     return bool(record and record.get("execution_status") == "completed" and record.get("continuity_status") == "verified"
-                and turn_signature(panel) == {key: record.get(key) for key in ("turn_count", "turn_sha256")})
+                and shows_turn(turn_signature(panel), record))
+
+
+def shows_turn(signature, record):
+    """The page's last turn is the record's. A virtualized page shows at most the record's turns, never none."""
+    return (signature["turn_sha256"] == record.get("turn_sha256")
+            and isinstance(record.get("turn_count"), int) and 0 < signature["turn_count"] <= record["turn_count"])
 
 
 def page_scope(page, origin):
@@ -344,9 +350,18 @@ def prepare_panel(page, origin, account, diagnostics):
 HISTORY_URL = r"/gateway/api/assist/rovo/v1/chat/(?:conversations|conversation/([0-9a-f-]{36})/messages)(?:\?.*)?"
 
 
+def message_text(content):
+    """Plain text of one Rovo message: markdown as sent, or ADF text with one line per block."""
+    if isinstance(content, str):
+        return content
+    text = lambda node: node.get("text", "") + "".join(text(child) for child in node.get("content", []))
+    return "\n".join(text(block) for block in content["content"]).strip()
+
+
 def track_history(page, origin):
     """Rovo's own history responses in this tab, keyed None for the chat list or by chat ID:
-    whether more exists and how many items arrived since the first page."""
+    whether more exists, how many items arrived since the first page and, for a chat, its messages.
+    The chat panel is virtualized, so these responses, not the page, hold a long chat's turns."""
     seen = {}
     pattern = re.compile(re.escape(origin) + HISTORY_URL)
 
@@ -355,15 +370,47 @@ def track_history(page, origin):
         if not match or response.request.method != "GET":
             return
         key = match.group(1)
-        earlier = seen.get(key, {}).get("items", 0) if "cursor" in parse_qs(urlsplit(response.url).query) else 0
+        cursor = "cursor" in parse_qs(urlsplit(response.url).query)
+        earlier = seen.get(key, {}) if cursor else {}
         try:
             body = response.json()
-            more, items = body["hasNext"] is not False, len(body["items"])
-        except (PlaywrightError, ValueError, KeyError, TypeError):
-            more, items = True, 0  # Unreadable counts as more history.
-        seen[key] = {"more": more, "items": earlier + items}
+            more, items = body["hasNext"] is not False, body["items"]
+            messages = [{"id": item.get("id"), "role": item["role"], "text": message_text(item["content"])} for item in items] if key else None
+        except (PlaywrightError, ValueError, KeyError, TypeError, AttributeError):
+            more, items, messages = True, [], None  # Unreadable counts as more history.
+        state = {"more": more, "items": earlier.get("items", 0) + len(items)}
+        if key:
+            # ponytail: assumes a cursor page holds older messages; unverified until a chat exceeds one page.
+            older = earlier.get("messages", [])
+            if messages is not None and older is not None:
+                # A page delivered twice must not duplicate turns.
+                ids = {message["id"] for message in older if message["id"]}
+                messages = [message for message in messages if message["id"] not in ids] + older
+            state["messages"] = messages if older is not None else None
+        seen[key] = state
     page.on("response", record)
     return seen
+
+
+def record_turn(history, chat_id, known, prompt, answer, message_id):
+    """Add a verified turn to the tab's copy of Rovo's history, which Rovo does not refetch in the same tab.
+    Only a copy that held exactly the known turns is extended; a new chat starts from zero."""
+    turn = [{"id": None, "role": "HUMAN", "text": prompt.strip()}, {"id": message_id, "role": "ASSISTANT", "text": answer}]
+    key = str(UUID(chat_id))
+    if known == 0:
+        history[key] = {"more": False, "items": 2, "messages": turn}
+    elif known is not None and server_turns(history, key) == known:
+        history[key] = history[key] | {"items": history[key]["items"] + 2, "messages": history[key]["messages"] + turn}
+    else:
+        history.pop(key, None)  # Unknown or inconsistent: fall back to what Rovo or the page shows next.
+
+
+def server_turns(history, chat_id):
+    """Turns Rovo returned for this chat, or None unless every page arrived."""
+    state = history.get(str(UUID(chat_id)))
+    if state and not state["more"] and state.get("messages") is not None:
+        return sum(message["role"] == "HUMAN" for message in state["messages"])
+    return None
 
 
 SCROLL_EDGE = """(el, top) => {
@@ -374,12 +421,12 @@ SCROLL_EDGE = """(el, top) => {
 
 
 def scroll_history(items, top, done, seconds=10):
-    """Scroll Rovo's lazy history toward the top or bottom until done() or time runs out. Never clicks."""
+    """Scroll Rovo's lazy history toward the top or bottom (None: only wait) until done() or time runs out. Never clicks."""
     deadline = time.monotonic() + seconds
     while not done():
         if time.monotonic() >= deadline:
             return
-        if items.count():
+        if top is not None and items.count():
             (items.first if top else items.last).evaluate(SCROLL_EDGE, top)
         # Not time.sleep: waiting here also delivers the response events track_history reads.
         items.page.wait_for_timeout(250)
@@ -408,10 +455,19 @@ def open_conversation(panel, chat_id, history):
     row = panel.get_by_test_id("chat-conversation-list-refresh-row-" + str(UUID(chat_id)))
     scroll_history(rows, False, lambda: row.is_visible() or list_complete(rows, history))
     row.wait_for(state="visible")
+    key = str(UUID(chat_id))
     click_control(row, "Conversation row")
     panel.get_by_role("searchbox", name="Search conversations...", exact=True).wait_for(state="hidden")
     panel.get_by_role("textbox").wait_for(state="visible")
     panel.get_by_test_id("chat-history-container").locator(".ak-renderer-document").first.wait_for(state="visible")
+    groups = panel.get_by_test_id("rovo-chat-message-group")
+    # Rovo fetches a chat once per tab; a reopen serves its cache, which record_turn keeps current.
+    scroll_history(groups, None, lambda: key in history, seconds=3)
+    if key in history and history[key]["more"]:
+        # Older pages load as the history scrolls up; return to the newest turn for the signature.
+        scroll_history(groups, True, lambda: not history[key]["more"])
+        groups.last.evaluate(SCROLL_EDGE, False)
+        panel.page.wait_for_timeout(250)
     require_idle(panel)
 
 
@@ -433,16 +489,17 @@ def last_message_id(panel):
 
 
 def warm_tab(panel, page, warm, prior, opened):
-    """Reuse the open chat only on proof it is the one just verified; anything else uses the picker."""
+    """Reuse the open chat only on proof it is the one just verified; anything else uses the picker.
+    Returns the page's turn signature as that proof, or None."""
     if (prior is None or warm is None or opened or warm["page"] is not page
             or warm["request_id"] != prior.get("request_id")
             or panel.get_by_role("searchbox", name="Search conversations...", exact=True).is_visible()):
-        return False
+        return None
     # Count first: turn_signature on zero groups would wait out the locator timeout.
-    count = panel.get_by_test_id("rovo-chat-message-group").count()
-    return (0 < count == prior.get("turn_count")
-            and turn_signature(panel) == {key: prior.get(key) for key in ("turn_count", "turn_sha256")}
-            and last_message_id(panel) == warm["message_id"])
+    if not panel.get_by_test_id("rovo-chat-message-group").count():
+        return None
+    signature = turn_signature(panel)
+    return signature if shows_turn(signature, prior) and last_message_id(panel) == warm["message_id"] else None
 
 
 OBSERVE_TURN = """panel => {
@@ -455,6 +512,7 @@ OBSERVE_TURN = """panel => {
   const groups = all(panel, '[data-testid="rovo-chat-message-group"]');
   const last = responses[responses.length - 1];
   const user = groups.length ? groups[groups.length - 1].querySelector('.ak-renderer-document') : null;
+  const ids = groups.length ? all(groups[groups.length - 1], '[data-message-id]') : [];
   return {
     status: statuses.length ? statuses[0].innerText : '',
     generating: all(panel, 'button, [role="button"]').some(el => label(el) === 'Stop generating' && visible(el)),
@@ -462,11 +520,12 @@ OBSERVE_TURN = """panel => {
     answer: last ? all(last, '.ak-renderer-document').map(el => el.innerText).join('\\n') : '',
     group_count: groups.length,
     user_text: user ? user.innerText : '',
+    last_id: ids.length === 1 ? ids[0].dataset.messageId : null,
   };
 }"""
 
 
-WAIT_TURN = """(panel, {before, prompt, ms}) => new Promise((resolve, reject) => {
+WAIT_TURN = """(panel, {before, prompt, ms, old_ids}) => new Promise((resolve, reject) => {
   const observe = """ + OBSERVE_TURN + """;
   let started = false, timer, observer;
   const finish = (turn, error) => { observer.disconnect(); clearTimeout(timer); error ? reject(error) : resolve(turn); };
@@ -475,7 +534,8 @@ WAIT_TURN = """(panel, {before, prompt, ms}) => new Promise((resolve, reject) =>
     let turn;
     try { turn = observe(panel); } catch (error) { return finish(null, error); }
     started = started || turn.generating || turn.status.trim() === 'Rovo is thinking';
-    if (last || (started && turn.count > before && turn.user_text.trim() === prompt
+    const fresh = turn.count > before || (turn.last_id && !old_ids.includes(turn.last_id));
+    if (last || (started && fresh && turn.user_text.trim() === prompt
         && turn.status.trim() === 'Response complete.' && !turn.generating && turn.answer.trim())) {
       finish({...turn, started});
     }
@@ -487,10 +547,10 @@ WAIT_TURN = """(panel, {before, prompt, ms}) => new Promise((resolve, reject) =>
 })"""
 
 
-def wait_turn(panel, before, prompt, ms):
+def wait_turn(panel, before, prompt, ms, old_ids=()):
     """One consistent read of the completion fields, taken as soon as the page shows a completed
     turn or after ms. "started" reports a start seen at any moment during the wait."""
-    return panel.evaluate(WAIT_TURN, {"before": before, "prompt": prompt.strip(), "ms": ms})
+    return panel.evaluate(WAIT_TURN, {"before": before, "prompt": prompt.strip(), "ms": ms, "old_ids": list(old_ids)})
 
 
 SEND_URL = (r"/gateway/api/assist/rovo/v1/chat/conversation/"
@@ -589,12 +649,14 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 require_idle(panel)
                 # Recheck idle only after an unchecked click (open_conversation checks its own); reads cannot change it.
                 idle_checked = True
-                selected_turn = None
+                selected_turn = known = None
                 responses = panel.get_by_test_id("assistant-response-card-layout")
                 history = owner.history.get(page, {})
-                if chat_id and warm_tab(panel, page, warm, prior if automatic else None, opened):
+                proof = warm_tab(panel, page, warm, prior if automatic else None, opened) if chat_id else None
+                if proof:
                     base["chat_selection"] = "warm_tab"
-                    selected_turn = {key: prior.get(key) for key in ("turn_count", "turn_sha256")}
+                    # The page's own signature for the pre-submit recheck; a virtualized page shows fewer turns than prior counts.
+                    selected_turn, known = proof, prior.get("turn_count")
                 elif chat_id or action == "chat_list":
                     if chat_id:
                         base["chat_selection"] = "picker"
@@ -610,31 +672,34 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         return base | {"execution_status": "completed", "chats": chats,
                                        "coverage": "complete" if complete else "loaded_only", "truncated": truncated}, 0
                     open_conversation(panel, chat_id, history)
+                    # The panel is virtualized: count turns from Rovo's data when all of it arrived.
+                    known = server_turns(history, chat_id)
                     if automatic:
                         selected_turn = turn_signature(panel)
-                        if selected_turn != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
+                        # A virtualized page shows at most Rovo's count; none or more than that is a change.
+                        counted = selected_turn | ({"turn_count": known} if known is not None and 0 < selected_turn["turn_count"] <= known else {})
+                        if counted != {key: prior.get(key) for key in ("turn_count", "turn_sha256")}:
                             base["error_code"] = "conversation_changed"
                             raise ValueError("Saved conversation changed or loaded history differs. Inspect it before explicit --chat continuation; no prompt sent.")
                     if action == "chat_export":
-                        groups, counts = panel.get_by_test_id("rovo-chat-message-group"), []
-
-                        def settled():
-                            # ponytail: "stable after one 250 ms scroll" is the end-of-render check; lengthen if older turns render slower.
-                            counts.append(groups.count())
-                            state = history.get(str(UUID(chat_id)))
-                            return bool(state) and not state["more"] and len(counts) > 1 and counts[-1] == counts[-2]
-                        scroll_history(groups, True, settled)
-                        turns = groups.evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
+                        state = history.get(str(UUID(chat_id))) or {}
+                        if state.get("messages") is not None:
+                            roles = {"HUMAN": "user", "ASSISTANT": "assistant"}
+                            pairs = [(roles[m["role"]], m["text"]) for m in state["messages"] if m["role"] in roles]
+                            complete = not state["more"]
+                        else:
+                            # Without Rovo's data only the turns the virtualized panel shows are readable.
+                            turns = panel.get_by_test_id("rovo-chat-message-group").evaluate_all("""els => els.map(el => ({user:el.querySelector('.ak-renderer-document')?.innerText || '',assistant:Array.from(el.querySelectorAll('[data-testid="assistant-response-card-layout"] .ak-renderer-document')).map(n=>n.innerText).join('\\n')}))""")
+                            pairs = [(role, turn[role]) for turn in turns for role in ("user", "assistant")]
+                            complete = False
                         messages, remaining = [], 24000
-                        total = sum(len(turn[role]) for turn in turns for role in ("user", "assistant"))
-                        for turn in turns:
-                            for role in ("user", "assistant"):
-                                if turn[role] and remaining > 0:
-                                    text = turn[role][:remaining]
-                                    messages.append({"role": role, "text": text})
-                                    remaining -= len(text)
+                        total = sum(len(text) for _, text in pairs)
+                        for role, text in pairs:
+                            if text and remaining > 0:
+                                messages.append({"role": role, "text": text[:remaining]})
+                                remaining -= len(text[:remaining])
                         owner.browsed.add(page)
-                        return base | {"execution_status": "completed", "coverage": "complete" if settled() else "loaded_only",
+                        return base | {"execution_status": "completed", "coverage": "complete" if complete else "loaded_only",
                                        "messages": messages, "truncated": total > 24000,
                                        "attachment_bytes_included": False}, 0
                 else:
@@ -652,6 +717,10 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                             raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
                 lap("select")
                 before = responses.count()
+                # Message IDs the chat already has: a different one on the last turn is a new turn.
+                old_ids = {last_message_id(panel)} | {message["id"] for message in
+                                                      (history.get(str(UUID(chat_id)), {}).get("messages") or [] if chat_id else [])}
+                old_ids.discard(None)
                 if chat_id and selected_turn is None:
                     selected_turn = turn_signature(panel)
                 if not idle_checked:
@@ -697,7 +766,7 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         # ponytail: site-left and deadline are noticed once per slice (up to 1 s), not every 200 ms;
                         # a navigation rejects the wait at once. Shorten the slice if that lag matters.
                         try:
-                            turn = wait_turn(panel, before, prompt, round(min(1, deadline - time.monotonic()) * 1000))
+                            turn = wait_turn(panel, before, prompt, round(min(1, deadline - time.monotonic()) * 1000), old_ids)
                         except PlaywrightError:
                             if not page.url.startswith(allowed_prefixes):
                                 raise ValueError("Browser left the expected site after submission.")
@@ -706,7 +775,8 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         started = started or turn["started"] or generating or status.strip() == "Rovo is thinking"
                         if completed_turn(started=started, count=turn["count"], status=status,
                                           generating=generating, answer=answer, before=before,
-                                          prompt_matches=turn["user_text"].strip() == prompt.strip()):
+                                          prompt_matches=turn["user_text"].strip() == prompt.strip(),
+                                          new_id=bool(turn.get("last_id")) and turn.get("last_id") not in old_ids):
                             lap("generate")
                             record.update(execution_status="completed", submission_state="observed_submitted")
                             record["continuity_status"] = "unavailable"
@@ -722,10 +792,13 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                                     if len(sends) != 1:
                                         raise ValueError("New conversation ID is missing or ambiguous")
                                     record["chat_id"] = sends[0]
-                                verified = record | signature | {"continuity_status": "verified"}
+                                # A virtualized panel undercounts a long chat; Rovo's count at selection plus this turn does not.
+                                saved = signature | ({"turn_count": known + 1} if chat_id and known is not None else {})
+                                verified = record | saved | {"continuity_status": "verified"}
                                 save_request(directory, verified)
                                 record = verified
                                 message_id = last_message_id(panel)
+                                record_turn(history, record["chat_id"], known if chat_id else 0, prompt, answer, message_id)
                                 if message_id:
                                     owner.warm = {"page": page, "request_id": record["request_id"], "message_id": message_id}
                             except Exception:

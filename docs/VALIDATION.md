@@ -1,10 +1,38 @@
 # Validation status
 
+## Verified long chats (2026-10-24)
+
+A synthetic chat was built to 30 turns, 30 Rovo questions in all. Findings:
+
+- Rovo's chat panel is **virtualized**: it keeps about 4 to 5 turns on the page, even after scrolling to the top (which shows the first turn). Counting the page undercounts any chat longer than that.
+- Rovo's `messages` response held the whole chat in one response at 30 turns (60 items, `hasNext: false`), oldest first, user text as ADF and answers as markdown, each with a message `id`. The page shows the assistant message `id` on each turn.
+- Reopening a chat in the same tab serves Rovo's cache: no new `messages` fetch.
+
+That broke three things, all now fixed. Export said `coverage: "complete"` while returning only the turns on the page. An automatic follow-up on a chat past about 5 turns refused with `conversation_changed`. And an ask on a long chat timed out after Rovo had answered: the rendered response count never grew, because the panel dropped an old turn as the new one appeared. The CLI now:
+
+- builds export from Rovo's message data in its own tab (text only, roles mapped to user/assistant, deduplicated by message `id`);
+- counts turns from that data, accepts a page showing 1 to that many turns, and adds each verified turn to the tab's copy because Rovo does not refetch;
+- treats a last-turn message `id` the chat did not have before submit as new-turn evidence, alongside a rising count;
+- applies the same 1-to-N rule to warm-tab reuse and exit cleanup.
+
+The timeout left one synthetic test record as `attempted_unknown`, which blocks the whole site. Rovo's data showed that prompt exactly once, with its answer. With the owner's approval, only that record was reconciled to completed (`continuity_status: unavailable`); the original is kept in private evidence. Nothing was resent.
+
+Live, installed candidate:
+
+| Step | Result |
+|---|---|
+| Explicit `--chat` ask at turn 12 | Completed and verified (completion by new message `id`) |
+| Automatic follow-ups, turns 13 to 30, four sessions | All verified. Each fresh process reopens through the picker; later asks use `warm_tab` (select 20 to 48 ms instead of about 1 s) |
+| Exit after long-chat asks | Tab closed; no CLI window left |
+| `chat export` of the 30-turn chat | `coverage: "complete"`, all 60 messages in exact order with correct roles |
+
+Unverified: a chat larger than one Rovo response. If Rovo pages it, the CLI scrolls up to load older pages and keeps `loaded_only` until Rovo reports the end; the order of merged pages is assumed. Offline: 345 passed and 13 opt-in skipped; 358 passed with `ROVO_DOM_CHECK=1`; installed 345 with 13 skipped.
+
 ## Verified history paging (2026-10-24)
 
 Read-only observation, 0 questions: Rovo's list fetches `GET .../chat/conversations?limit=25`, then prefetches `limit=75` with a cursor, about 100 chats in all. The panel renders only the first 25 rows until it is scrolled. Opening a chat fetches `GET .../chat/conversation/{id}/messages`. Both responses carry `items`, `cursor` and `hasNext`.
 
-The CLI now records those responses from its own tab (listening starts before the page loads) and scrolls the list or the chat until `hasNext` is false. A list is `coverage: "complete"` only when every returned chat is rendered; an export only when the turn count is also stable after a scroll. Anything else stays `loaded_only`. Scrolling stops at 100 listed chats or 10 seconds and never clicks.
+The CLI now records those responses from its own tab (listening starts before the page loads) and scrolls the list or the chat until `hasNext` is false. A list is `coverage: "complete"` only when every returned chat is rendered. (Export first also counted rendered turns; the long-chat section below replaced that.) Anything else stays `loaded_only`. Scrolling stops at 100 listed chats or 10 seconds and never clicks.
 
 Live on the development Mac, through the installed candidate, 0 questions:
 
@@ -13,7 +41,7 @@ Live on the development Mac, through the installed candidate, 0 questions:
 | `chat list` | `coverage: "complete"`, 29 chats (the old code listed the 25 rendered rows) |
 | `chat export --chat` of the oldest chat | Found through the picker below the first 25 rows; `coverage: "complete"`, 2 messages |
 
-The development site has no chat longer than one Rovo page, so loading older turns by scrolling up is covered offline only. Offline: 324 passed and 11 opt-in skipped; 335 passed with `ROVO_DOM_CHECK=1`; the installed suite passed 324 with 11 skipped.
+Offline: 324 passed and 11 opt-in skipped; 335 passed with `ROVO_DOM_CHECK=1`; the installed suite passed 324 with 11 skipped.
 
 Both commands first retained their tab, because cleanup could not prove the picker or an exported chat idle. Now a successful list or export (which checks idle before it starts) marks its tab, and exit closes it unless a draft, attachment or response appeared since. Rerun live, 0 questions: list (29, complete) and export (complete) each exited with no retention notice and no CLI window left; the user's tabs were unchanged. Offline: 335 passed and 11 skipped; 346 with `ROVO_DOM_CHECK=1`; installed 335 with 11 skipped.
 
@@ -191,7 +219,7 @@ These checks used incremental installs on one macOS development host. The final 
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, more than two images, upload error variants, older turns of chats longer than one Rovo page, uncertain-delivery reconciliation, actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (over 60 messages), uncertain-delivery reconciliation, actual Copilot invocation, other machines/OS versions, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 

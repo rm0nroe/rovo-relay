@@ -27,6 +27,7 @@ Development Mac, one retained session, in seconds. "Before" is the baseline afte
 9. **Older history paging.** Shipped. `chat list`, `chat export` and the picker scroll Rovo's lazy history until Rovo reports the end, and report `coverage: "complete"` only then. Live: all 29 chats listed (25 were rendered before), and the oldest exported through the picker. See [Validation](VALIDATION.md#verified-history-paging-2026-10-24).
 10. **Close the tab after list and export.** Shipped. A successful `chat list` or `chat export` began idle, so at exit its tab closes unless a draft, attachment or response appeared since; a later operation in the same session clears that. Live: both commands left no window behind.
 11. **Session: ask after a list.** Fixed. `chat list` left the conversation picker open, which hides the composer, so the next command in the same `session` stopped with `Rovo panel/composer did not become ready` (nothing was sent). The list now returns to the chat view before it returns.
+12. **Long chats.** Fixed and live-verified to 30 turns. Rovo's panel is virtualized, so export, turn counts, completion and warm-tab reuse no longer rely on counting the page; they use Rovo's own message data and message IDs. See [Validation](VALIDATION.md#verified-long-chats-2026-10-24).
 
 ## Unverified or not implemented
 
@@ -35,6 +36,6 @@ Development Mac, one retained session, in seconds. "Before" is the baseline afte
 - Mini-modal ask, list and export (blocked by `rovo_layout_unverified`).
 - Grounded GitHub retrieval and structured citations.
 - MCP fallback in a real Copilot session.
-- Loading older turns of a chat longer than one Rovo page (no such chat on the development site), and lists past Rovo's first 100 chats.
+- Chats larger than one Rovo `messages` response (over 60 messages; 30 turns still fit in one), and lists past Rovo's first 100 chats.
 - More than two images, upload error variants, uncertain-delivery reconciliation, other machines and OS versions, headless operation.
 - Token and billing savings measured in Copilot (current figures are byte estimates).
