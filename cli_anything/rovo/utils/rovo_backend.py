@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from uuid import UUID, uuid4
 from hashlib import sha256
+from urllib.parse import urlsplit
 import json
 
 from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -125,7 +126,7 @@ class BrowserConnection:
             page.set_default_timeout(10000)
             self.diagnostics = {"readiness_phase": "page_navigation"}
             page.goto(origin + "/jira/for-you", wait_until="domcontentloaded", timeout=10000)
-        if not page.url.startswith((origin + "/jira/", origin + "/browse/")):
+        if page_scope(page, origin) == "other":
             raise ValueError("CLI tab left the requested Jira site; retained without navigation or refresh.")
         return page
 
@@ -178,6 +179,7 @@ def click_control(locator, control, **kwargs):
             reason = "target_closed"
         # Only emit our vocabulary, never copy DOM previews or locator arguments.
         waiting = resolved = False
+        line = ""
         for line in log.splitlines():
             line = re.sub(r"^\s*-\s*(?:\d+\s*×\s*)?", "", line).strip()
             waiting |= bool(re.match(r"waiting for (?:locator|get_by_\w+|getBy\w+)\(", line))
@@ -197,7 +199,17 @@ def click_control(locator, control, **kwargs):
                 reason = "navigation_pending"
         if reason == "unknown" and waiting and not resolved:
             reason = "locator_not_resolved"
+        elif reason == "unknown" and line == "performing click action":
+            # Input was sent but the page never acknowledged it (main thread busy, e.g. a sign-in bounce).
+            reason = "input_not_acknowledged"
         raise ClickError(control, reason, isinstance(error, PlaywrightTimeoutError)) from None
+
+
+def page_scope(page, origin):
+    """Fixed label for where the CLI tab is; never the URL itself."""
+    if page.url.startswith((origin + "/jira/", origin + "/browse/")):
+        return "jira"
+    return "atlassian_identity" if urlsplit(page.url)[:2] == ("https", "id.atlassian.com") else "other"
 
 
 def resolve_panel(page):
@@ -227,18 +239,30 @@ def prepare_panel(page, origin, account, diagnostics):
     diagnostics.update(readiness_phase="account", readiness_timeout_ms=10000)
     try:
         while True:
-            if not page.url.startswith((origin + "/jira/", origin + "/browse/")):
+            scope = page_scope(page, origin)
+            if scope == "other":
                 raise ValueError("CLI tab left the requested Jira site during preparation.")
-            if not authenticated:
+            if scope == "jira":
+                diagnostics.pop("page_scope", None)
+            else:
+                # Atlassian sign-in bounce: wait for Jira without touching the page.
+                diagnostics["page_scope"] = scope
+            if scope == "jira" and not authenticated:
                 if identity.is_visible():
                     # Keep overflow open: it also contains the narrow-window Rovo launcher.
                     authenticated = True
                 else:
                     more = page.get_by_role("button", name="Show more", exact=True)
                     if not more_opened and more.is_visible():
-                        click_control(more, "Show more", timeout=max(1, int((deadline - time.monotonic()) * 1000)))
-                        more_opened = True
-            if authenticated:
+                        try:
+                            click_control(more, "Show more", timeout=max(1, int((deadline - time.monotonic()) * 1000)))
+                        except ClickError:
+                            if page_scope(page, origin) != "atlassian_identity":
+                                raise
+                            diagnostics["page_scope"] = "atlassian_identity"
+                        else:
+                            more_opened = True
+            if scope == "jira" and authenticated:
                 diagnostics["readiness_phase"] = "panel"
                 panel = resolve_panel(page)
                 if panel is not None:
@@ -260,7 +284,7 @@ def prepare_panel(page, origin, account, diagnostics):
                 raise ValueError("Rovo panel/composer did not become ready within 10 seconds; tab retained without refresh or submission.")
             page.wait_for_timeout(100)
     finally:
-        if more_opened:
+        if more_opened and page_scope(page, origin) == "jira":
             page.keyboard.press("Escape")
 
 
