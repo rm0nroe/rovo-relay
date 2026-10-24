@@ -31,6 +31,11 @@ CASES = {
     + GROUP.format("Synthetic prompt", CARD.format(DOC.format("Done")))
     + '<button aria-label="Stop generating" style="visibility:hidden">x</button>',
     "empty welcome": STATUS.format(""),
+    # The new turn's group is rendered with its message ID before its own answer card.
+    "new turn without card": STATUS.format("Rovo is thinking")
+    + GROUP.format("First prompt", CARD.format(DOC.format("First answer")))
+    + '<div data-testid="rovo-chat-message-group" data-message-id="00000000-0000-4000-8000-000000000002">'
+    + '<div class="ak-renderer-document">Synthetic prompt</div></div>',
 }
 
 
@@ -63,7 +68,8 @@ def separate_reads(panel):
         "status": panel.get_by_test_id("chat-history-status-live-region").inner_text(),
         "generating": panel.get_by_role("button", name="Stop generating", exact=True).is_visible(),
         "count": count,
-        "answer": "\n".join(responses.last.locator(".ak-renderer-document").all_inner_texts()) if count else "",
+        # The last group's own cards, as turn_signature reads them; the panel's last card can be the previous turn's.
+        "answer": "\n".join(groups.last.get_by_test_id("assistant-response-card-layout").locator(".ak-renderer-document").all_inner_texts()) if groups.count() else "",
         "group_count": groups.count(),
         "user_text": groups.last.locator(".ak-renderer-document").first.inner_text() if groups.count() else "",
         "last_id": (groups.last.locator("[data-message-id]").get_attribute("data-message-id")
@@ -82,6 +88,10 @@ def snapshot(panel, ms=0, before=99, prompt="Synthetic prompt"):
 def test_snapshot_matches_separate_reads(page, name):
     panel = panel_for(page, CASES[name])
     assert snapshot(panel) == separate_reads(panel)
+
+
+def test_new_turn_without_its_card_has_no_answer_yet(page):
+    assert snapshot(panel_for(page, CASES["new turn without card"]))["answer"] == ""
 
 
 def test_missing_status_reads_as_not_complete(page):

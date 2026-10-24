@@ -287,3 +287,23 @@ def test_follow_up_refuses_when_rovo_reports_a_turn_added_elsewhere(run_browser,
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and result["error_code"] == "conversation_changed", result
     target.submit.click.assert_not_called()
+
+
+@pytest.mark.parametrize("new_card,partial", [(False, ""), (True, "Partial new answer")])
+def test_timeout_reports_only_this_turns_partial_answer(run_browser, new_card, partial):
+    # The previous turn's answer is the panel's last card until the new turn renders its own.
+    target = existing()
+    target.user.inner_text.return_value = "Different prior question"
+    target.status.inner_text.side_effect = lambda: "Rovo is thinking"
+
+    def submit():
+        target.user.inner_text.return_value = PROMPT
+        target.groups.count.return_value = 2
+        if new_card:
+            target.responses.count.return_value = 2
+            target.content.all_inner_texts.return_value = [partial]
+
+    target.submit.click.side_effect = submit
+    result, code = run_browser(target, prompt=PROMPT, chat_id=CHAT, timeout=1)
+    assert code == 3 and result["execution_status"] == "timeout", result
+    assert result["partial_answer"] == partial
