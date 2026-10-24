@@ -90,7 +90,7 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
         "status": status.inner_text(), "generating": stop.is_visible(), "count": responses.count(),
         "answer": "\n".join(content.all_inner_texts()) if responses.count() else "",
         "group_count": groups.count(), "user_text": user.inner_text() if groups.count() else "",
-        "started": False,
+        "last_id": message.get_attribute("data-message-id") if groups.count() else None, "started": False,
     }
     groups.last.get_by_test_id.return_value.locator.return_value = content
     new_chat.click.side_effect = lambda: (setattr(responses.count, "return_value", 0), setattr(groups.count, "return_value", 0))
@@ -698,12 +698,19 @@ def test_cleanup_rechecks_origin_after_pending_navigation_events(run_browser):
 CHAT = "12345678-1234-4234-8234-123456789abc"
 
 
+def turns(*texts):
+    """Synthetic Rovo message items: ADF user text, markdown assistant text, alternating."""
+    return [{"id": "id-" + text, "role": "HUMAN", "content": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}}
+            if n % 2 == 0 else {"id": "id-" + text, "role": "ASSISTANT", "content": text} for n, text in enumerate(texts)]
+
+
 def history(target, items, more, *, chat=None, cursor=False):
-    """Deliver one of Rovo's own paged history responses (list, or one chat's messages) to the tab."""
+    """Deliver one of Rovo's own paged history responses (list, or one chat's messages) to the tab.
+    items is a count of placeholder items, or a list of message items."""
     path = f"conversation/{chat}/messages" if chat else "conversations?limit=25"
     url = f"{ORIGIN}/gateway/api/assist/rovo/v1/chat/{path}" + (("&" if "?" in path else "?") + "cursor=synthetic" if cursor else "")
     response = SimpleNamespace(url=url, request=SimpleNamespace(method="GET"),
-                               json=lambda: {"items": [{}] * items, "cursor": "synthetic" if more else None, "hasNext": more})
+                               json=lambda: {"items": [{}] * items if isinstance(items, int) else items, "cursor": "synthetic" if more else None, "hasNext": more})
     for handler in list(target.listeners.get("response", [])):
         handler(response)
 
@@ -754,21 +761,30 @@ def test_chat_list_stops_scrolling_past_the_output_cap(run_browser):
 
 
 @pytest.mark.parametrize("ends", [True, False])
-def test_chat_export_scrolls_up_until_older_turns_end(run_browser, ends):
+def test_chat_export_reads_every_turn_from_rovo_not_the_virtualized_panel(run_browser, ends):
     target = page_fixture(ORIGIN + "/jira/for-you")
-    target.groups.evaluate_all.return_value = [{"user": "Synthetic question", "assistant": "Synthetic answer"}]
-    target.row.click.side_effect = lambda **k: history(target, 2, True, chat=CHAT)
+    # The panel keeps only the newest turn on the page.
+    target.groups.evaluate_all.return_value = [{"user": "Q3", "assistant": "A3"}]
+    target.row.click.side_effect = lambda **k: history(target, turns("Q2", "A2", "Q3", "A3"), True, chat=CHAT)
 
     def scroll(script, top):
-        assert top is True
-        history(target, 4, not ends, chat=CHAT, cursor=True)
-        target.groups.count.return_value = 3
+        if top is True:
+            history(target, turns("Q1", "A1"), not ends, chat=CHAT, cursor=True)
     target.groups.first.evaluate.side_effect = scroll
     result, code = run_browser(target, action="chat_export", chat_id=CHAT)
     assert code == 0, result
     assert result["coverage"] == ("complete" if ends else "loaded_only")
-    assert result["messages"] == [{"role": "user", "text": "Synthetic question"}, {"role": "assistant", "text": "Synthetic answer"}]
+    assert [m["text"] for m in result["messages"]] == ["Q1", "A1", "Q2", "A2", "Q3", "A3"]
+    assert [m["role"] for m in result["messages"]] == ["user", "assistant"] * 3
     target.submit.click.assert_not_called()
+
+
+def test_chat_export_without_rovo_data_falls_back_to_the_page_as_loaded_only(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.groups.evaluate_all.return_value = [{"user": "Synthetic question", "assistant": "Synthetic answer"}]
+    result, code = run_browser(target, action="chat_export", chat_id=CHAT)
+    assert code == 0 and result["coverage"] == "loaded_only", result
+    assert result["messages"] == [{"role": "user", "text": "Synthetic question"}, {"role": "assistant", "text": "Synthetic answer"}]
 
 
 def browsed(action):
@@ -805,3 +821,28 @@ def test_list_and_export_keep_a_tab_that_holds_work_or_failed(run_browser, actio
     result, code = run_browser(target, **kwargs)
     assert code == (1 if state == "error" else 0), result.get("message")
     target.page.close.assert_not_called()
+
+
+@pytest.mark.parametrize("new_id", [True, False])
+def test_completion_on_a_virtualized_panel_needs_a_new_message_id(run_browser, new_id):
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
+    send = target.submit.click.side_effect
+
+    def virtualized_send(**kwargs):
+        send()
+        # The rendered turn count stays the same: an older turn left the page.
+        target.responses.count.return_value -= 1
+        if not new_id:
+            target.message.get_attribute.return_value = MESSAGE_ID.format(0)
+    target.submit.click.side_effect = virtualized_send
+    from itertools import chain, repeat
+    target.status.inner_text.side_effect = chain(["Rovo is thinking"], repeat("Response complete."))
+    read = target.panel.evaluate.side_effect
+    # The answer is on the page even though the rendered turn count did not grow.
+    target.panel.evaluate.side_effect = lambda script, arg=None: read(script, arg) | {"answer": "Synthetic answer"}
+    result, code = run_browser(target, prompt=PROMPT, timeout=1)
+    if new_id:
+        assert code == 0 and result["execution_status"] == "completed", result.get("message")
+    else:
+        assert code == 3 and result["execution_status"] == "timeout", (result.get("execution_status"), result.get("message"))
+    target.submit.click.assert_called_once()

@@ -54,6 +54,14 @@ def test_terminal_status_without_observed_start_is_not_completion():
         assert not completed_turn(**(good | change))
 
 
+def test_a_new_message_id_is_new_turn_evidence_when_the_count_cannot_grow():
+    # A virtualized panel can drop an old turn as the new one renders.
+    good = dict(started=True, count=4, before=4, status="Response complete.", generating=False, answer="ok")
+    assert completed_turn(**good, new_id=True)
+    assert not completed_turn(**good)
+    assert not completed_turn(**(good | dict(prompt_matches=False)), new_id=True)
+
+
 @pytest.mark.parametrize("generating", [None, 0, ""])
 def test_completion_rejects_non_boolean_generation_state(generating):
     assert not completed_turn(started=True, count=1, status="Response complete.",
