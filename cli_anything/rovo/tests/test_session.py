@@ -544,8 +544,8 @@ def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkey
     browser_env.connect.assert_called_once()
     browser_env.target.new_chat.click.assert_called_once()
     assert browser_env.target.submit.click.call_count == 2
-    # Only the first ask's capture opens the picker; the follow-up reuses the verified open chat.
-    browser_env.target.row.click.assert_called_once()
+    # New-chat capture binds from the send request; the follow-up reuses the verified open chat.
+    browser_env.target.row.click.assert_not_called()
 
 
 def warm_ask(connection):
@@ -562,7 +562,7 @@ def test_warm_tab_survives_show_more_during_preparation(browser_env):
         result, code = warm_ask(connection)
     assert code == 0 and result["chat_selection"] == "warm_tab", result
     env.target.more.click.assert_called_once()
-    env.target.row.click.assert_called_once()
+    env.target.row.click.assert_not_called()
 
 
 def consume_with_failed_ask(env, connection, directory):
@@ -607,7 +607,7 @@ def test_unproven_warm_tab_falls_back_to_picker(browser_env, tmp_path, case):
         FALLBACKS[case](env, connection, state_dir(tmp_path, ORIGIN, "pilot"))
         result, code = warm_ask(connection)
     assert code == 0 and result["chat_selection"] == "picker" and result["turn_count"] == 2, result
-    assert env.target.row.click.call_count == 2
+    env.target.row.click.assert_called_once()
     assert env.target.submit.click.call_count == 2
 
 
@@ -619,7 +619,7 @@ def test_changed_open_chat_uses_picker_and_stops(browser_env, case):
         CHANGED[case](env)
         result, code = warm_ask(connection)
     assert code == 1 and result["error_code"] == "conversation_changed", result
-    assert env.target.row.click.call_count == 2
+    env.target.row.click.assert_called_once()
     env.target.submit.click.assert_called_once()
 
 

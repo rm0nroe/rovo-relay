@@ -1,5 +1,18 @@
 # Validation status
 
+## Verified new-chat capture (2026-10-24)
+
+A passive observer on the owned tab showed that Rovo's send request names the new conversation in its URL: exactly one `POST {site}/gateway/api/assist/rovo/v1/chat/conversation/{id}/message/stream/sse`, sent about 90 ms after Submit, with the prompt in its body. The ID appeared in no earlier request, and it matched the ID the previous picker comparison, reopen and turn-hash check verified. The request streams the answer and never finishes, so the CLI reads it as it starts. Analytics beacons, read-status updates and browser storage were rejected as sources.
+
+The change passed **302 tests** from source and from the installed wheel, with **8 opt-in local-browser checks skipped** in each, and all 15 packaged files matched source. One synthetic `ask --new` then ran through the installed CLI in normal Chrome:
+
+| Phase | Previous path (same day, two runs) | Send-request capture |
+|---|---:|---:|
+| Select | 719 to 763 ms | 55 ms |
+| Capture | 1,155 to 1,156 ms | 14 ms |
+
+The answer completed with verified continuity and turn count one. A read-only export of the bound ID in the same session returned exactly the synthetic prompt and answer. One question was sent; no submission was retried. Preparation time is not compared because the acceptance run prepared the panel during session startup. These are single observations, not averages.
+
 ## Verified follow-up speed (2026-10-24)
 
 Implementation `125d940`, included in published `main` at `34ffca7`, passed the live comparison below through the installed CLI in normal Chrome. Both source and installed-wheel suites passed **302 tests**, with **8 opt-in local-browser checks skipped** in each. The wheel used the declared isolated build requirements, and all 15 packaged files matched source byte for byte.

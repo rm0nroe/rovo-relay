@@ -44,14 +44,14 @@ def test_click_timeout_only_emits_allowlisted_reason(run_browser, log, reason, c
         assert secret not in output
 
 
-@pytest.mark.parametrize("name", ["Menu", "View all conversations", "Go back to Rovo chat"])
+@pytest.mark.parametrize("name", ["Menu", "View all conversations"])
 def test_chat_navigation_timeout_identifies_exact_control(run_browser, name):
     target = page_fixture(ORIGIN + "/jira/for-you")
     control = target.panel.get_by_role("button", name=name, exact=True)
     if name == "Menu":
         target.panel.get_by_role("button", name="View all conversations", exact=True).is_visible.return_value = False
     control.click.side_effect = TimeoutError('Locator.click: Timeout 10000ms exceeded.')
-    result, code = run_browser(target, prompt=PROMPT)
+    result, code = run_browser(target, prompt=PROMPT, chat_id="12345678-1234-4234-8234-123456789abc")
     assert code == 1 and result["click_diagnostics"]["control"] == name
     assert result["click_diagnostics"]["reason"] == "unknown"
     control.click.assert_called_once()
@@ -68,18 +68,6 @@ def test_submit_timeout_preserves_uncertain_delivery_guard(run_browser, tmp_path
     assert result["submission_state"] == "attempted_unknown" and result["retry_safe"] is False
     assert read_request(state_dir(tmp_path, ORIGIN, "probe"))["submission_state"] == "attempted_unknown"
     assert run_browser(prompt=PROMPT)[1] == 4
-    target.submit.click.assert_called_once()
-
-
-def test_capture_click_failure_keeps_completed_answer_and_safe_diagnostics(run_browser):
-    target = page_fixture(ORIGIN + "/jira/for-you")
-    target.row.click.side_effect = TimeoutError(f'Locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for get_by_test_id("{PRIVATE}")')
-    result, code = run_browser(target, prompt=PROMPT)
-    assert code == 0 and result["answer"] == "Synthetic answer"
-    assert result["continuity_status"] == "unavailable" and result["retry_safe"] is False
-    assert next_action(result, code) == "new_or_inspect"
-    assert result["click_diagnostics"] == {"control": "Conversation row", "reason": "locator_not_resolved", "timed_out": True}
-    assert PRIVATE not in json.dumps(result)
     target.submit.click.assert_called_once()
 
 
