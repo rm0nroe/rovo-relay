@@ -6,4 +6,4 @@ Do not commit browser profiles, cookies, credentials, account-specific configura
 
 This is an experimental browser bridge. Preserve the distinction between a completed response and verified retrieval. Do not retry uncertain submissions or enable billable usage automatically. Run offline tests by default; live Rovo requests require authorization and consume the account's allowance.
 
-The supported pilot uses an existing, explicitly approved Chrome connection. Do not weaken browser protections, silently approve debugging, copy credentials or claim unattended operation.
+The supported pilot uses an existing, explicitly approved Chrome connection. Do not weaken browser protections, copy credentials or claim unattended operation.

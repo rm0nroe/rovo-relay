@@ -165,7 +165,7 @@ Use the owner's existing signed-in normal Google Chrome, in the same OS/user env
 
 For agent-driven inspection, prefer native normal Chrome computer use (`cua.getApp("com.google.Chrome")` when available). Use the current session's assigned browser name for any named browser tooling, never a hardcoded or default session. The product test itself must run the installed CLI. A successful UI click through another tool does not prove that the CLI worked.
 
-Chrome's supported remote-debugging setting and the owner's explicit approval are prerequisites, not steps to automate around. Verify current Chrome/runtime compatibility against the canonical setup document. Do not fabricate `DevToolsActivePort`, copy profiles/cookies, relaunch with debugging flags, or silently approve the connection.
+Chrome's supported remote-debugging setting and the owner's approval are prerequisites. Verify current Chrome/runtime compatibility against the canonical setup document. Do not fabricate `DevToolsActivePort`, copy profiles/cookies, or relaunch with debugging flags.
 
 If discovery fails while the intended Chrome already exposes debugging, identify its advertised port or independently verify listener ownership. On this Mac, use `lsof -nP -iTCP:PORT -sTCP:LISTEN` with the observed port and check the owning process/profile. Only then use global `--chrome-port PORT`. The successful development path used Chrome's loopback browser WebSocket; a `/json/version` HTTP 404 did not diagnose that connection. Do not guess ports or automatically switch endpoints.
 
