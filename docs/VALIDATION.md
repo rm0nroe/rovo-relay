@@ -8,7 +8,7 @@ Evidence, without Rovo questions: opening a tab the old way changed the user's v
 
 The CLI now opens its tab in its own unfocused window, moved off-screen but not minimized (macOS keeps a thin sliver visible). A click that times out on a hidden page reports `reason: page_hidden`. At exit it also closes its idle tab when the tab shows exactly the session's last verified answer, so finished chats no longer leave windows behind; drafts, uncertain delivery and unverified content are still retained.
 
-Live on the development Mac, through the installed candidate, 2 Rovo questions:
+Live on the development Mac, through the installed candidate, 3 Rovo questions:
 
 | Step | Result |
 |---|---|
@@ -17,7 +17,7 @@ Live on the development Mac, through the installed candidate, 2 Rovo questions:
 | Fresh process follow-up | Same chat through the picker (select 973 ms), turn 2 verified; export showed both pairs |
 | After both runs | The user's Jira tab stayed `visible`; no CLI tab or window remained |
 
-Rovo answered from the file names because the prompt prohibited tools, so this verifies the upload path, not Rovo's image reading. Offline: 316 passed and 11 opt-in skipped; 327 passed with `ROVO_DOM_CHECK=1`. Multiple-monitor placement is unverified: a display left of the main one could show the window.
+The first ask's prompt prohibited tools, so Rovo answered from the file names. A third question used neutral names (`img1.png`, `img2.png`) and allowed viewing: Rovo answered `red, blue`, correct and in order (generate 15.1 s), so both images reach the model. Offline: 316 passed and 11 opt-in skipped; 327 passed with `ROVO_DOM_CHECK=1`. Multiple-monitor placement is unverified: a display left of the main one could show the window.
 
 ## Verified pre-send read dedupe (2026-10-24)
 
