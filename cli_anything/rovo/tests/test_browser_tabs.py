@@ -66,6 +66,11 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
             page.url = after_submit_url
 
     submit.click.side_effect = send
+    panel.evaluate.side_effect = lambda script: {
+        "status": status.inner_text(), "generating": stop.is_visible(), "count": responses.count(),
+        "answer": "\n".join(content.all_inner_texts()) if responses.count() else "",
+        "group_count": groups.count(), "user_text": user.inner_text() if groups.count() else "",
+    }
     groups.last.get_by_test_id.return_value.locator.return_value = content
     new_chat.click.side_effect = lambda: (setattr(responses.count, "return_value", 0), setattr(groups.count, "return_value", 0))
     search, menu, all_chats, back, rows, row, history = [MagicMock(spec=Locator) for _ in range(7)]

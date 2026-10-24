@@ -298,6 +298,32 @@ def turn_signature(panel):
     return {"turn_count": groups.count(), "turn_sha256": sha256(json.dumps([user, answer]).encode()).hexdigest()}
 
 
+OBSERVE_TURN = """panel => {
+  const all = (root, selector) => Array.from(root.querySelectorAll(selector));
+  const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const label = el => (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || '').trim();
+  const statuses = all(panel, '[data-testid="chat-history-status-live-region"]');
+  if (statuses.length > 1) throw new Error('Multiple Rovo status regions');
+  const responses = all(panel, '[data-testid="assistant-response-card-layout"]');
+  const groups = all(panel, '[data-testid="rovo-chat-message-group"]');
+  const last = responses[responses.length - 1];
+  const user = groups.length ? groups[groups.length - 1].querySelector('.ak-renderer-document') : null;
+  return {
+    status: statuses.length ? statuses[0].innerText : '',
+    generating: all(panel, 'button, [role="button"]').some(el => label(el) === 'Stop generating' && visible(el)),
+    count: responses.length,
+    answer: last ? all(last, '.ak-renderer-document').map(el => el.innerText).join('\\n') : '',
+    group_count: groups.length,
+    user_text: user ? user.innerText : '',
+  };
+}"""
+
+
+def observe_turn(panel):
+    """One consistent read of the completion fields; a missing status region reads as not complete."""
+    return panel.evaluate(OBSERVE_TURN)
+
+
 def observed_ids(rows):
     ids = rows.evaluate_all("els => els.map(el => el.dataset.testid.replace('chat-conversation-list-refresh-row-', ''))")
     return {str(UUID(value)) for value in ids}
@@ -454,24 +480,19 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 while time.monotonic() < deadline:
                     if not page.url.startswith(allowed_prefixes):
                         raise ValueError("Browser left the expected site after submission.")
-                    status = panel.get_by_test_id("chat-history-status-live-region").inner_text()
-                    generating = stop.is_visible()
+                    turn = observe_turn(panel)
+                    status, generating, answer = turn["status"], turn["generating"], turn["answer"]
                     started = started or generating or status.strip() == "Rovo is thinking"
-                    count = responses.count()
-                    content = responses.last.locator(".ak-renderer-document")
-                    answer = "\n".join(content.all_inner_texts()) if count else ""
-                    groups = panel.get_by_test_id("rovo-chat-message-group")
-                    user_text = groups.last.locator(".ak-renderer-document").first.inner_text() if groups.count() else ""
-                    if completed_turn(started=started, count=count, status=status,
+                    if completed_turn(started=started, count=turn["count"], status=status,
                                       generating=generating, answer=answer, before=before,
-                                      prompt_matches=user_text.strip() == prompt.strip()):
+                                      prompt_matches=turn["user_text"].strip() == prompt.strip()):
                         lap("generate")
                         record.update(execution_status="completed", submission_state="observed_submitted")
                         record["continuity_status"] = "unavailable"
                         save_request(directory, record)
                         warnings = []
                         try:
-                            signature = {"turn_count": groups.count(),
+                            signature = {"turn_count": turn["group_count"],
                                          "turn_sha256": sha256(json.dumps([prompt.strip(), answer.strip()]).encode()).hexdigest()}
                             if turn_signature(panel) != signature:
                                 raise ValueError("Completed conversation changed before capture")
