@@ -58,7 +58,7 @@ The foreground `session` and human REPL retain one lazy approved Chrome connecti
 
 On 2026-10-22, the installed 0.1.0a3 candidate passed all 132 offline tests with `CLI_ANYTHING_FORCE_INSTALLED=1`, its executable directory on PATH and the test process outside the checkout. Imports resolved to the installed package; all 12 packaged source/document files and three source mirror pairs matched byte for byte. `git diff --check` passed. Build and egg-info scaffolding was removed; private evidence stayed outside Git. No live browser connection or Rovo submission was attempted.
 
-Direct persistent attachment was not live-accepted for 0.1.0a3; the 0.1.0a4 local read-only result is recorded above. Do not send a diagnostic question, approve debugging automatically, change browser protections or terminate user Chrome to test disconnects. The prior local handshake failure's approval hypothesis remains unconfirmed. Copilot acceptance and mini-modal generation/attachment/completion gates remain open; this lifecycle change does not expand mini-modal operations or automatic MCP eligibility.
+Direct persistent attachment was not live-accepted for 0.1.0a3; the 0.1.0a4 local read-only result is recorded above. Do not send a diagnostic question, change browser protections or terminate user Chrome to test disconnects. The prior local handshake failure's approval hypothesis remains unconfirmed. Copilot acceptance and mini-modal generation/attachment/completion gates remain open; this lifecycle change does not expand mini-modal operations or automatic MCP eligibility.
 
 ## Panel compatibility candidate
 
