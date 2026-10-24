@@ -602,10 +602,13 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     if action == "chat_list":
                         scroll_history(rows, False, lambda: list_complete(rows, history) or rows.count() > 100)
                         chats = rows.evaluate_all("""els => els.slice(0,100).map(el => ({id:el.dataset.testid.replace('chat-conversation-list-refresh-row-',''),title:el.getAttribute('aria-label')}))""")
+                        complete, truncated = list_complete(rows, history), rows.count() > 100
+                        # The open picker hides the composer, which the next operation in a session waits for.
+                        click_control(panel.get_by_role("button", name="Go back to Rovo chat", exact=True), "Go back to Rovo chat")
+                        panel.get_by_role("searchbox", name="Search conversations...", exact=True).wait_for(state="hidden")
                         owner.browsed.add(page)
                         return base | {"execution_status": "completed", "chats": chats,
-                                       "coverage": "complete" if list_complete(rows, history) else "loaded_only",
-                                       "truncated": rows.count() > 100}, 0
+                                       "coverage": "complete" if complete else "loaded_only", "truncated": truncated}, 0
                     open_conversation(panel, chat_id, history)
                     if automatic:
                         selected_turn = turn_signature(panel)
