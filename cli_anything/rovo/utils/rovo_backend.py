@@ -123,7 +123,7 @@ class BrowserConnection:
         if page is None or page.is_closed():
             if len(browser.contexts) != 1:
                 raise ValueError("Expected one approved Chrome context; cannot safely choose a profile.")
-            page = browser.contexts[0].new_page()
+            page = owned_window_page(browser)
             self.targets[key] = page
             page.set_default_timeout(10000)
             self.diagnostics = {"readiness_phase": "page_navigation"}
@@ -133,17 +133,19 @@ class BrowserConnection:
         return page
 
     def __exit__(self, *exc):
-        for (origin, _, _), page in self.targets.items():
+        for (origin, session, _), page in self.targets.items():
             try:
                 if page.is_closed():
                     continue
-                # Only discard our own verified empty legacy panel; unknown state stays visible.
-                if page in self.cleanable and page.url.startswith((origin + "/jira/", origin + "/browse/")):
+                # Only discard our own idle legacy panel that is verified empty or shows the verified answer.
+                if page.url.startswith((origin + "/jira/", origin + "/browse/")):
                     panel = resolve_panel(page)
                     if panel is not None and panel.get_attribute("data-testid") == "conversation-assistant.ui.conversation-assistant":
                         require_idle(panel)
-                        if (panel.get_by_test_id("rovo-chat-message-group").count() == 0
-                                and panel.get_by_test_id("assistant-response-card-layout").count() == 0
+                        empty = (page in self.cleanable
+                                 and panel.get_by_test_id("rovo-chat-message-group").count() == 0
+                                 and panel.get_by_test_id("assistant-response-card-layout").count() == 0)
+                        if ((empty or answered(panel, read_request(state_dir(Path.home(), origin, session))))
                                 and page.url.startswith((origin + "/jira/", origin + "/browse/"))):
                             page.close()
                             continue
@@ -204,7 +206,39 @@ def click_control(locator, control, **kwargs):
         elif reason == "unknown" and line == "performing click action":
             # Input was sent but the page never acknowledged it (main thread busy, e.g. a sign-in bounce).
             reason = "input_not_acknowledged"
+        if reason == "unknown" and page_hidden(locator):
+            reason = "page_hidden"
         raise ClickError(control, reason, isinstance(error, PlaywrightTimeoutError)) from None
+
+
+def page_hidden(locator):
+    try:
+        return locator.page.evaluate("document.visibilityState") == "hidden"
+    except PlaywrightError:
+        return False
+
+
+def owned_window_page(browser):
+    """Open the CLI tab in its own unfocused window, never the user's active tab.
+
+    The window sits off-screen but not minimized: hidden pages pause animation frames,
+    and Playwright's click stability check then times out."""
+    cdp = browser.new_browser_cdp_session()
+    try:
+        with browser.contexts[0].expect_page() as created:
+            target_id = cdp.send("Target.createTarget", {"url": "about:blank", "newWindow": True, "background": True})["targetId"]
+        window = cdp.send("Browser.getWindowForTarget", {"targetId": target_id})["windowId"]
+        # ponytail: macOS clamps this to a ~40 px sliver on the main display; a display left of it would show the window.
+        cdp.send("Browser.setWindowBounds", {"windowId": window, "bounds": {"left": -10000, "top": 0, "width": 1440, "height": 900}})
+    finally:
+        cdp.detach()
+    return created.value
+
+
+def answered(panel, record):
+    """The tab shows exactly the last verified answer, so the saved chat holds everything."""
+    return bool(record and record.get("execution_status") == "completed" and record.get("continuity_status") == "verified"
+                and turn_signature(panel) == {key: record.get(key) for key in ("turn_count", "turn_sha256")})
 
 
 def page_scope(page, origin):

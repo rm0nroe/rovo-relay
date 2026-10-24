@@ -15,7 +15,7 @@ from cli_anything.rovo import rovo_cli
 from cli_anything.rovo.core.state import read_request, save_request, site_lock, state_dir
 from cli_anything.rovo.utils import rovo_backend
 from test_continuity import count_reads
-from test_browser_tabs import ACCOUNT, MESSAGE_ID, MINI_PANEL, ORIGIN, PROMPT, page_fixture
+from test_browser_tabs import ACCOUNT, MESSAGE_ID, MINI_PANEL, ORIGIN, PROMPT, owned_context, page_fixture
 
 FLAGS = ["--site", ORIGIN, "--session", "pilot", "--account", ACCOUNT]
 
@@ -24,7 +24,7 @@ FLAGS = ["--site", ORIGIN, "--session", "pilot", "--account", ACCOUNT]
 def browser_env(monkeypatch, tmp_path):
     target = page_fixture(ORIGIN + "/browse/DEMO-1")
     browser = MagicMock(spec=Browser)
-    browser.contexts = [SimpleNamespace(pages=[], new_page=MagicMock(return_value=target.page))]
+    browser.contexts = [owned_context([], target.page)]
     browser.is_connected.return_value = True
     runtime = MagicMock()
     connect = runtime.__enter__.return_value.chromium.connect_over_cdp
@@ -552,8 +552,9 @@ def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkey
     # New-chat capture binds from the send request; the follow-up reuses the verified open chat.
     browser_env.target.row.click.assert_not_called()
     # New chat: idle before and after the click, signature at capture. Warm follow-up: one idle
-    # check; signature in warm_tab, after fill and at capture.
-    assert calls == {"require_idle": 2 + 1, "turn_signature": 1 + 3}
+    # check; signature in warm_tab, after fill and at capture. Exit cleanup: one of each.
+    assert calls == {"require_idle": 2 + 1 + 1, "turn_signature": 1 + 3 + 1}
+    browser_env.target.page.close.assert_called_once()
 
 
 def warm_ask(connection):
