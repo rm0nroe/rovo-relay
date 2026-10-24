@@ -1,13 +1,14 @@
-"""The single completion snapshot must read what the separate locator calls read.
+"""The in-page completion wait must read what the separate locator calls read, and return early on completion.
 
 Opt-in (ROVO_DOM_CHECK=1): starts a throwaway headless Chrome on local HTML, never Rovo or the user's browser.
 """
 import os
+import time
 
 import pytest
 from playwright.sync_api import Error, sync_playwright
 
-from cli_anything.rovo.utils.rovo_backend import observe_turn
+from cli_anything.rovo.utils.rovo_backend import wait_turn
 
 STATUS = '<div data-testid="chat-history-status-live-region">{}</div>'
 GROUP = '<div data-testid="rovo-chat-message-group"><div class="ak-renderer-document">{}</div>{}</div>'
@@ -67,18 +68,64 @@ def separate_reads(panel):
     }
 
 
+def snapshot(panel, ms=0, before=99, prompt="Synthetic prompt"):
+    """A wait that cannot complete early (before=99) returns the slice-end snapshot."""
+    turn = wait_turn(panel, before, prompt, ms)
+    turn.pop("started")
+    return turn
+
+
 @pytest.mark.parametrize("name", CASES)
 def test_snapshot_matches_separate_reads(page, name):
     panel = panel_for(page, CASES[name])
-    assert observe_turn(panel) == separate_reads(panel)
+    assert snapshot(panel) == separate_reads(panel)
 
 
 def test_missing_status_reads_as_not_complete(page):
     panel = panel_for(page, GROUP.format("Synthetic prompt", ""))
-    assert observe_turn(panel)["status"] == ""
+    assert snapshot(panel)["status"] == ""
 
 
 def test_duplicate_status_regions_fail_like_strict_locators(page):
     panel = panel_for(page, STATUS.format("Response complete.") * 2)
     with pytest.raises(Error):
-        observe_turn(panel)
+        snapshot(panel)
+
+
+THINKING = (STATUS.format("Rovo is thinking") + GROUP.format("Synthetic prompt", "")
+            + '<button aria-label="Stop generating">x</button>')
+FINISH = """() => setTimeout(() => {
+  const panel = document.querySelector('[data-testid="rovo-test-panel"]');
+  panel.querySelector('[data-testid="chat-history-status-live-region"]').textContent = 'Response complete.';
+  panel.querySelector('button').remove();
+  panel.querySelector('[data-testid="rovo-chat-message-group"]').insertAdjacentHTML('beforeend',
+    '<div data-testid="assistant-response-card-layout"><div class="ak-renderer-document">Done</div></div>');
+}, 300)"""
+
+
+def test_wait_returns_as_soon_as_the_page_completes(page):
+    panel = panel_for(page, THINKING)
+    page.evaluate(FINISH)
+    started_at = time.monotonic()
+    turn = wait_turn(panel, 0, "Synthetic prompt", 5000)
+    elapsed = time.monotonic() - started_at
+    assert turn["started"] and turn["status"] == "Response complete." and turn["answer"] == "Done"
+    assert 0.25 < elapsed < 1, elapsed
+
+
+def test_start_seen_mid_wait_is_reported_after_it_ends(page):
+    panel = panel_for(page, THINKING)
+    page.evaluate("""() => setTimeout(() => {
+      document.querySelector('[data-testid="chat-history-status-live-region"]').textContent = '';
+      document.querySelector('button').remove();
+    }, 50)""")
+    turn = wait_turn(panel, 0, "Synthetic prompt", 300)
+    assert turn["started"] and turn["status"] == "" and not turn["generating"]
+
+
+def test_other_prompt_never_completes_early(page):
+    panel = panel_for(page, THINKING)
+    page.evaluate(FINISH)
+    started_at = time.monotonic()
+    turn = wait_turn(panel, 0, "Another prompt", 800)
+    assert time.monotonic() - started_at >= 0.75 and turn["status"] == "Response complete."
