@@ -13,7 +13,9 @@ Live, through the installed candidate, 0 questions:
 | `chat list` | `coverage: "complete"`, 29 chats (the old code listed the 25 rendered rows) |
 | `chat export --chat` of the oldest chat | Found through the picker below the first 25 rows; `coverage: "complete"`, 2 messages |
 
-The development site has no chat longer than one Rovo page, so loading older turns by scrolling up is covered offline only. Both commands retained their tab, as before: cleanup cannot prove the picker or an exported chat is idle. Offline: 324 passed and 11 opt-in skipped; 335 passed with `ROVO_DOM_CHECK=1`; the installed suite passed 324 with 11 skipped.
+The development site has no chat longer than one Rovo page, so loading older turns by scrolling up is covered offline only. Offline: 324 passed and 11 opt-in skipped; 335 passed with `ROVO_DOM_CHECK=1`; the installed suite passed 324 with 11 skipped.
+
+Both commands first retained their tab, because cleanup could not prove the picker or an exported chat idle. Now a successful list or export (which checks idle before it starts) marks its tab, and exit closes it unless a draft, attachment or response appeared since. Rerun live, 0 questions: list (29, complete) and export (complete) each exited with no retention notice and no CLI window left; the user's tabs were unchanged. Offline: 335 passed and 11 skipped; 346 with `ROVO_DOM_CHECK=1`; installed 335 with 11 skipped.
 
 ## Verified hidden CLI window (2026-10-24)
 
