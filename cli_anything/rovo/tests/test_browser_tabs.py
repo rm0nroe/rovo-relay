@@ -15,6 +15,7 @@ ACCOUNT = "user@example.com"
 PANEL = "conversation-assistant.ui.conversation-assistant"
 MINI_PANEL = "conversation-assistant-mini-modal-main-container"
 PROMPT = "Summarize a synthetic fixture"
+MESSAGE_ID = "00000000-0000-4000-8000-{:012d}"
 
 
 def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
@@ -56,12 +57,19 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
     content.all_inner_texts.return_value = ["Synthetic answer"]
     groups.count.return_value = 0 if empty_chat else 1
     groups.last.locator.return_value.first = user
+    # Synthetic server message ID on the last group; each submission creates a new one.
+    message = MagicMock(spec=Locator)
+    message.count.return_value = 1
+    message.get_attribute.return_value = MESSAGE_ID.format(0)
+    renderer = groups.last.locator.return_value
+    groups.last.locator.side_effect = lambda selector: message if selector == "[data-message-id]" else renderer
     user.inner_text.return_value = PROMPT
     status.inner_text.side_effect = ["Rovo is thinking", "Response complete."]
 
     def send():
         responses.count.return_value += 1
         groups.count.return_value += 1
+        message.get_attribute.return_value = MESSAGE_ID.format(submit.click.call_count)
         if after_submit_url:
             page.url = after_submit_url
 
@@ -110,7 +118,8 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
                            textbox=textbox, stop=stop, attachments=attachments,
                            responses=responses, groups=groups, welcome=welcome,
                            status=status, new_chat=new_chat, launcher=launcher, identity=identity,
-                           rows=rows, row=row, content=content, user=user)
+                           rows=rows, row=row, content=content, user=user, message=message,
+                           search=search, more=more)
 
 
 @pytest.fixture

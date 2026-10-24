@@ -3,7 +3,7 @@ import io
 import json
 import signal
 import sys
-from itertools import count
+from itertools import chain, count, repeat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -14,7 +14,7 @@ from playwright.sync_api import Browser, Error
 from cli_anything.rovo import rovo_cli
 from cli_anything.rovo.core.state import read_request, save_request, site_lock, state_dir
 from cli_anything.rovo.utils import rovo_backend
-from test_browser_tabs import ACCOUNT, MINI_PANEL, ORIGIN, PROMPT, page_fixture
+from test_browser_tabs import ACCOUNT, MESSAGE_ID, MINI_PANEL, ORIGIN, PROMPT, page_fixture
 
 FLAGS = ["--site", ORIGIN, "--session", "pilot", "--account", ACCOUNT]
 
@@ -540,6 +540,99 @@ def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkey
     first, second = results[1:]
     assert first["chat_id"] == second["chat_id"]
     assert second["conversation_mode"] == "continued" and second["turn_count"] == 2
+    assert second["chat_selection"] == "warm_tab" and "chat_selection" not in first
     browser_env.connect.assert_called_once()
     browser_env.target.new_chat.click.assert_called_once()
     assert browser_env.target.submit.click.call_count == 2
+    # Only the first ask's capture opens the picker; the follow-up reuses the verified open chat.
+    browser_env.target.row.click.assert_called_once()
+
+
+def warm_ask(connection):
+    return rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, connection=connection)
+
+
+def test_warm_tab_survives_show_more_during_preparation(browser_env):
+    env = browser_env
+    env.target.status.inner_text.side_effect = ["Rovo is thinking", "Response complete."] * 2
+    with rovo_backend.BrowserConnection() as connection:
+        assert warm_ask(connection)[1] == 0
+        env.target.identity.is_visible.side_effect = chain([False], repeat(True))
+        env.target.more.is_visible.return_value = True
+        result, code = warm_ask(connection)
+    assert code == 0 and result["chat_selection"] == "warm_tab", result
+    env.target.more.click.assert_called_once()
+    env.target.row.click.assert_called_once()
+
+
+def consume_with_failed_ask(env, connection, directory):
+    env.target.textbox.evaluate.return_value = "Leftover draft"
+    assert warm_ask(connection)[1] == 1
+    env.target.textbox.evaluate.return_value = ""
+
+
+def rewrite_request_id(env, connection, directory):
+    with site_lock(directory):
+        save_request(directory, read_request(directory) | {"request_id": "another-process"})
+
+
+def consume_with_chat_list(env, connection, directory):
+    env.target.rows.count.return_value = 1
+    assert rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, action="chat_list", connection=connection)[1] == 0
+
+
+FALLBACKS = {
+    "panel_reopened": lambda env, *_: setattr(env.target.panel.is_visible, "return_value", False),
+    "status_between": lambda env, connection, _: rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, connection=connection),
+    "chat_list_between": consume_with_chat_list,
+    "failed_ask_between": consume_with_failed_ask,
+    "request_id_changed": rewrite_request_id,
+    "search_visible": lambda env, *_: setattr(env.target.search.is_visible, "return_value", True),
+    # Another chat whose last turn is identical: only the server message ID differs.
+    "message_id_changed": lambda env, *_: setattr(env.target.message.get_attribute, "return_value", MESSAGE_ID.format(99)),
+}
+CHANGED = {
+    "zero_groups": lambda env: setattr(env.target.groups.count, "return_value", 0),
+    "count_changed": lambda env: setattr(env.target.groups.count, "return_value", 2),
+    "text_changed": lambda env: setattr(env.target.user.inner_text, "return_value", "Another task"),
+}
+
+
+@pytest.mark.parametrize("case", FALLBACKS)
+def test_unproven_warm_tab_falls_back_to_picker(browser_env, tmp_path, case):
+    env = browser_env
+    env.target.status.inner_text.side_effect = ["Rovo is thinking", "Response complete."] * 2
+    with rovo_backend.BrowserConnection() as connection:
+        assert warm_ask(connection)[1] == 0
+        FALLBACKS[case](env, connection, state_dir(tmp_path, ORIGIN, "pilot"))
+        result, code = warm_ask(connection)
+    assert code == 0 and result["chat_selection"] == "picker" and result["turn_count"] == 2, result
+    assert env.target.row.click.call_count == 2
+    assert env.target.submit.click.call_count == 2
+
+
+@pytest.mark.parametrize("case", CHANGED)
+def test_changed_open_chat_uses_picker_and_stops(browser_env, case):
+    env = browser_env
+    with rovo_backend.BrowserConnection() as connection:
+        assert warm_ask(connection)[1] == 0
+        CHANGED[case](env)
+        result, code = warm_ask(connection)
+    assert code == 1 and result["error_code"] == "conversation_changed", result
+    assert env.target.row.click.call_count == 2
+    env.target.submit.click.assert_called_once()
+
+
+def test_replaced_tab_uses_picker_even_with_matching_message(browser_env):
+    env = browser_env
+    with rovo_backend.BrowserConnection() as connection:
+        assert warm_ask(connection)[1] == 0
+        replacement = page_fixture(ORIGIN + "/jira/for-you")
+        replacement.responses.count.return_value = replacement.groups.count.return_value = 1
+        replacement.message.get_attribute.return_value = env.target.message.get_attribute.return_value
+        env.browser.contexts[0].new_page.return_value = replacement.page
+        env.target.page.is_closed.return_value = True
+        result, code = warm_ask(connection)
+    assert code == 0 and result["chat_selection"] == "picker", result
+    replacement.row.click.assert_called_once()
+    replacement.submit.click.assert_called_once()

@@ -33,6 +33,7 @@ def test_new_chat_binding_survives_restart_and_followup(run_browser, tmp_path):
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 0 and result["conversation_mode"] == "continued", result
     assert result["chat_id"] == CHAT and result["turn_count"] == 2
+    assert result["chat_selection"] == "picker"
     target.new_chat.click.assert_not_called()
     target.row.click.assert_called_once()
     target.submit.click.assert_called_once()
