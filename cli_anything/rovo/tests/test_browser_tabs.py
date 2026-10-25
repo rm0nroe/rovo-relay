@@ -646,8 +646,12 @@ def test_owned_tab_opens_offscreen_in_its_own_background_window(run_browser):
     calls = [c.args for c in cdp.send.call_args_list]
     assert calls[0] == ("Target.createTarget", {"url": "about:blank", "newWindow": True, "background": True})
     bounds = next(args[1]["bounds"] for args in calls if args[0] == "Browser.setWindowBounds")
-    # Minimized pages are hidden and pause animation frames, so clicks would time out.
-    assert bounds["left"] < 0 and (bounds["width"], bounds["height"]) == (1440, 900) and "windowState" not in bounds
+    # Minimized pages are hidden and pause animation frames, so clicks would time out. macOS keeps a
+    # corner of any window on screen; the smallest window parked bottom-right leaves the least.
+    assert bounds["left"] > 5000 and bounds["top"] > 5000 and bounds["width"] <= 200 and bounds["height"] <= 200
+    assert "windowState" not in bounds
+    # The page keeps Rovo's desktop layout whatever size Chrome and macOS give the window.
+    target.page.set_viewport_size.assert_called_once_with({"width": 1440, "height": 900})
     cdp.detach.assert_called_once()
     target.page.goto.assert_called_once()
 
@@ -661,8 +665,8 @@ def test_only_verified_empty_owned_legacy_tab_is_closed(run_browser):
     assert not user.page.mock_calls
 
 
-@pytest.mark.parametrize("state", ["draft", "attachment", "generating", "response", "mini", "hidden"])
-def test_cleanup_preserves_any_nonempty_or_unverified_owned_tab(run_browser, state):
+@pytest.mark.parametrize("state", ["draft", "attachment", "mini", "hidden"])
+def test_cleanup_preserves_local_work_or_an_unverifiable_owned_tab(run_browser, state):
     target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True,
                           draft="User draft" if state == "draft" else "",
                           layout=MINI_PANEL if state == "mini" else PANEL)
@@ -672,12 +676,25 @@ def test_cleanup_preserves_any_nonempty_or_unverified_owned_tab(run_browser, sta
     target.textbox.is_visible.return_value = state != "hidden"
     run_browser(target)
     target.page.close.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ["generating", "response"])
+def test_cleanup_closes_an_owned_tab_that_holds_only_rovos_own_chat(run_browser, state):
+    # Rovo keeps the chat server-side, even an answer still generating when the tab closes (verified
+    # live); reconcile and export read it back. Only unsent local work would be lost with the tab.
+    target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
+    target.stop.is_visible.return_value = state == "generating"
+    target.responses.count.return_value = int(state == "response")
+    run_browser(target)
+    target.page.close.assert_called_once()
     target.page.reload.assert_not_called()
 
 
-def test_uncertain_send_never_closes_even_an_empty_owned_tab(run_browser, tmp_path):
+def test_failed_submit_keeps_the_tab_holding_the_prompt(run_browser, tmp_path):
     target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
-    target.submit.click.side_effect = RuntimeError("Connection lost during submit")
+    # A click that did not go through leaves the prompt in the composer: unsent local work.
+    target.submit.click.side_effect = lambda: (setattr(target.textbox.evaluate, "return_value", PROMPT),
+                                               (_ for _ in ()).throw(RuntimeError("Connection lost during submit")))
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 1 and result["submission_state"] == "attempted_unknown", result
     target.page.close.assert_not_called()
@@ -688,11 +705,12 @@ def test_uncertain_send_never_closes_even_an_empty_owned_tab(run_browser, tmp_pa
 def test_cleanup_rechecks_origin_after_pending_navigation_events(run_browser):
     target = page_fixture(ORIGIN + "/jira/for-you", empty_chat=True)
 
-    def deliver_navigation():
+    def deliver_navigation(script):
         target.page.url = "https://other.atlassian.net/jira/for-you"
-        return 0
+        return ""
 
-    target.groups.count.side_effect = deliver_navigation
+    # Exit cleanup reads the draft, the read that lets pending navigation events arrive.
+    target.textbox.evaluate.side_effect = deliver_navigation
     assert run_browser(target)[1] == 0
     target.page.close.assert_not_called()
 
@@ -852,7 +870,7 @@ def test_list_and_export_close_their_idle_owned_tab(run_browser, action):
 
 @pytest.mark.parametrize("action", ["chat_list", "chat_export"])
 @pytest.mark.parametrize("state", ["draft", "attachment", "generating", "error"])
-def test_list_and_export_keep_a_tab_that_holds_work_or_failed(run_browser, action, state):
+def test_list_and_export_keep_a_tab_only_for_unsent_work(run_browser, action, state):
     target, kwargs = browsed(action)
     def later(script):
         # Work appears after the operation's own idle checks, as if someone used the window meanwhile.
@@ -865,7 +883,8 @@ def test_list_and_export_keep_a_tab_that_holds_work_or_failed(run_browser, actio
     (target.groups if action == "chat_export" else target.rows).evaluate_all.side_effect = later
     result, code = run_browser(target, **kwargs)
     assert code == (1 if state == "error" else 0), result.get("message")
-    target.page.close.assert_not_called()
+    # Rovo keeps its chat; only work that was never sent would be lost.
+    assert target.page.close.call_count == (0 if state in ("draft", "attachment") else 1)
 
 
 @pytest.mark.parametrize("new_id", [True, False])

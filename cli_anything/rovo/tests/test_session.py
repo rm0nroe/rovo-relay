@@ -552,8 +552,8 @@ def test_two_asks_auto_continue_in_one_foreground_connection(browser_env, monkey
     # New-chat capture binds from the send request; the follow-up reuses the verified open chat.
     browser_env.target.row.click.assert_not_called()
     # New chat: idle before and after the click, signature at capture. Warm follow-up: one idle
-    # check; signature in warm_tab, after fill and at capture. Exit cleanup: one of each.
-    assert calls == {"require_idle": 2 + 1 + 1, "turn_signature": 1 + 3 + 1}
+    # check; signature in warm_tab, after fill and at capture. Exit cleanup checks only for unsent work.
+    assert calls == {"require_idle": 2 + 1, "turn_signature": 1 + 3}
     browser_env.target.page.close.assert_called_once()
 
 
@@ -717,3 +717,21 @@ def test_long_chat_follow_up_reuses_the_open_tab_and_exit_closes_it(browser_env)
         result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, connection=connection)
         assert code == 0 and result["chat_selection"] == "warm_tab" and result["turn_count"] == 12, result.get("message")
     target.page.close.assert_called_once()
+
+
+def test_reconcile_on_a_retained_connection_reads_a_fresh_tab(browser_env):
+    # Rovo does not refetch a chat in a tab that already loaded it, so the tab that timed out
+    # holds history from before its own send. Reconcile must read Rovo's data in a new tab.
+    from test_browser_tabs import history, turns
+    from test_reconcile import CHAT
+    env = browser_env
+    env.target.status.inner_text.side_effect = repeat("Rovo is thinking")
+    with rovo_backend.BrowserConnection() as connection:
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, prompt=PROMPT, timeout=1, new=True, connection=connection)
+        assert code == 3 and result["execution_status"] == "timeout", result
+        fresh = page_fixture(ORIGIN + "/jira/for-you")
+        fresh.row.click.side_effect = lambda **k: history(fresh, turns(PROMPT, "Late answer"), False, chat=CHAT)
+        env.browser.contexts[0].new_page.return_value = fresh.page
+        result, code = rovo_backend.operate(ORIGIN, "pilot", ACCOUNT, action="reconcile", connection=connection)
+        assert code == 0 and result["answer"] == "Late answer", result
+        fresh.submit.click.assert_not_called()

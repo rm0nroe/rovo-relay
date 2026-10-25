@@ -5,6 +5,7 @@ import os
 import platform
 import shlex
 import signal
+import socket
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -43,7 +44,7 @@ def cli(ctx, json_mode, site, session, account, chrome_port, approve_chrome_prom
 
 def capabilities():
     return {"version": __version__,
-            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action", "guarded Chrome prompt approval", "reconcile"],
+            "implemented": ["doctor", "session", "status", "chat list", "chat export", "mcp begin", "mcp finish", "ask (new or existing chat, PNG images, GitHub source filter)", "automatic conversation continuity", "agent next action", "guarded Chrome prompt approval", "reconcile", "broker"],
             "mcp_handoff": "agent_tools_with_local_guard"}
 
 
@@ -205,9 +206,123 @@ def emit(result, stream=False):
     return code
 
 
+# One-shot commands a running broker serves on its connection; everything else runs here.
+FORWARDED = ("status", "ask", "chat", "reconcile")
+
+
+def broker_path():
+    return Path.home() / ".cli-anything-rovo" / "broker.sock"
+
+
+def subcommand(args):
+    """The command name: the first argument that is neither a global option nor its value."""
+    valued = {opt for param in cli.params if not getattr(param, "is_flag", False) for opt in param.opts}
+    skip = False
+    for arg in args:
+        if skip or arg in valued:
+            skip = not skip and arg in valued
+            continue
+        if not arg.startswith("-"):
+            return arg
+    return None
+
+
+def forward(args):
+    """The live broker's result for args, or None when no broker is listening (run directly)."""
+    if subcommand(args) not in FORWARDED or {"--dry-run", "--help", "-h"} & set(args) or any(
+            arg == "--prompt-file=-" or (arg == "--prompt-file" and args[i + 1:i + 2] == ["-"]) for i, arg in enumerate(args)):
+        return None
+    client = socket.socket(socket.AF_UNIX)
+    try:
+        client.connect(str(broker_path()))
+    except OSError:
+        client.close()
+        return None
+    with client:
+        try:
+            client.sendall(json.dumps({"argv": args, "cwd": os.getcwd()}).encode() + b"\n")
+            reply = json.loads(client.makefile(encoding="utf-8").readline())
+            return reply["payload"], reply["code"]
+        except (OSError, ValueError, KeyError, TypeError):
+            # The broker may have acted; never fall back to sending directly.
+            return acted(({"schema_version": 1, "execution_status": "error", "submission_state": "attempted_unknown",
+                           "retry_safe": False, "message": "Broker ended before replying; run status before anything else, never resubmit."}, 3))
+
+
 def run(args):
-    result = invoke(args)
+    result = forward(args) or invoke(args)
     return emit(result) if isinstance(result, tuple) else result or 0
+
+
+@cli.command()
+@click.option("--idle-minutes", type=click.FloatRange(0, 1440, min_open=True), default=30.0, show_default=True)
+@click.pass_context
+def broker(ctx, idle_minutes):
+    """Hold one approved Chrome connection for later one-shot commands by this user; exits when idle."""
+    if ctx.obj.get("connection") is not None:
+        raise click.UsageError("broker cannot run inside a session.")
+    if ctx.obj["dry_run"]:
+        return {"schema_version": 1, "execution_status": "completed", "dry_run": True}, 0
+    path = broker_path()
+    probe = socket.socket(socket.AF_UNIX)
+    try:
+        probe.connect(str(path))
+        return preparation_error(ValueError("A broker is already running for this user."))
+    except OSError:
+        path.unlink(missing_ok=True)  # Stale socket from a broker that did not exit cleanly.
+    finally:
+        probe.close()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    server = socket.socket(socket.AF_UNIX)
+    umask = os.umask(0o177)  # Owner-only socket from the moment it exists.
+    try:
+        server.bind(str(path))
+    finally:
+        os.umask(umask)
+    server.listen(8)
+    server.settimeout(idle_minutes * 60)
+    reason = "interrupted"
+    try:
+        with foreground_connection(ctx.obj["chrome_port"], ctx.obj["approve_chrome_prompt"]) as connection:
+            try:
+                connection.get()
+            except ValueError as error:
+                return {"schema_version": 1, "execution_status": "error", "message": str(error), **connection.diagnostics,
+                        "submission_state": "not_attempted", "retry_safe": True}, 1
+            emit(({"schema_version": 1, "execution_status": "ready", "idle_minutes": idle_minutes, **capabilities()}, 0), stream=True)
+            # ponytail: one command at a time; others queue on the socket. Concurrency needs per-site locking first.
+            while not connection.failed:
+                try:
+                    client, _ = server.accept()
+                except TimeoutError:
+                    reason = "idle"
+                    break
+                with client:
+                    line = client.makefile(encoding="utf-8").readline()
+                    if not line:
+                        continue  # A liveness probe, or a client that hung up before asking.
+                    try:
+                        request = json.loads(line)
+                        os.chdir(request["cwd"])
+                        result = invoke(list(request["argv"]), obj={"connection": connection})
+                        if not isinstance(result, tuple):
+                            raise ValueError("no result")
+                    except (OSError, ValueError, KeyError, TypeError) as error:
+                        result = preparation_error(ValueError("Malformed broker request: " + type(error).__name__))
+                    payload, code = result
+                    emit(result, stream=True)
+                    try:
+                        client.sendall(json.dumps({"payload": payload, "code": code}, ensure_ascii=False).encode() + b"\n")
+                    except OSError:
+                        pass  # The client left; its result is in the log line above and in local state.
+            else:
+                reason = "connection_lost"
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+        path.unlink(missing_ok=True)
+    return {"schema_version": 1, "execution_status": "stopped", "reason": reason}, 0
 
 
 @contextmanager
