@@ -230,3 +230,19 @@ def test_multiline_prompt_is_proved_from_rovo_blocks(run_browser, blocks):
              {"id": "id-a", "role": "ASSISTANT", "content": "Late answer"}]
     result, code = run_browser(reopened(items), action="reconcile")
     assert code == 0 and result["answer"] == "Late answer", result
+
+
+def test_repeated_prompt_in_a_paged_chat_proves_only_the_new_copy(run_browser, tmp_path):
+    # The prompt was asked before (one earlier turn); the retry timed out. Rovo returns the earlier
+    # turn first and the newer one on a cursor page; gluing by timestamps keeps the old copy out.
+    timed_out(run_browser)
+    directory = state_dir(tmp_path, ORIGIN, "probe")
+    with site_lock(directory):
+        save_request(directory, read_request(directory) | {"turns_before": 1})
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    old, new = turns(PROMPT, "Old answer"), turns(PROMPT, "New answer", start=2)
+    new = [item | {"id": item["id"] + "-2"} for item in new]
+    target.row.click.side_effect = lambda **k: history(target, old, True, chat=CHAT)
+    target.groups.first.evaluate.side_effect = lambda script, top: top is True and history(target, new, False, chat=CHAT, cursor=True)
+    result, code = run_browser(target, action="reconcile")
+    assert code == 0 and result["answer"] == "New answer", result

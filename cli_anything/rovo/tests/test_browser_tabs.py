@@ -1,4 +1,6 @@
 """Offline browser-boundary fixtures; no Chrome connection or Rovo requests."""
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -698,10 +700,13 @@ def test_cleanup_rechecks_origin_after_pending_navigation_events(run_browser):
 CHAT = "12345678-1234-4234-8234-123456789abc"
 
 
-def turns(*texts):
-    """Synthetic Rovo message items: ADF user text, markdown assistant text, alternating."""
-    return [{"id": "id-" + text, "role": "HUMAN", "content": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}}
-            if n % 2 == 0 else {"id": "id-" + text, "role": "ASSISTANT", "content": text} for n, text in enumerate(texts)]
+def turns(*texts, start=0):
+    """Synthetic Rovo message items: ADF user text, markdown assistant text, alternating,
+    one second apart from `start` seconds (Rovo's RFC 1123 `time_created`)."""
+    def at(n):
+        return format_datetime(datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=start + n), usegmt=True)
+    return [({"id": "id-" + text, "role": "HUMAN", "content": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}}
+             if n % 2 == 0 else {"id": "id-" + text, "role": "ASSISTANT", "content": text}) | {"time_created": at(n)} for n, text in enumerate(texts)]
 
 
 def history(target, items, more, *, chat=None, cursor=False):
@@ -765,7 +770,7 @@ def test_chat_export_reads_every_turn_from_rovo_not_the_virtualized_panel(run_br
     target = page_fixture(ORIGIN + "/jira/for-you")
     # The panel keeps only the newest turn on the page.
     target.groups.evaluate_all.return_value = [{"user": "Q3", "assistant": "A3"}]
-    target.row.click.side_effect = lambda **k: history(target, turns("Q2", "A2", "Q3", "A3"), True, chat=CHAT)
+    target.row.click.side_effect = lambda **k: history(target, turns("Q2", "A2", "Q3", "A3", start=2), True, chat=CHAT)
 
     def scroll(script, top):
         if top is True:
@@ -777,6 +782,46 @@ def test_chat_export_reads_every_turn_from_rovo_not_the_virtualized_panel(run_br
     assert [m["text"] for m in result["messages"]] == ["Q1", "A1", "Q2", "A2", "Q3", "A3"]
     assert [m["role"] for m in result["messages"]] == ["user", "assistant"] * 3
     target.submit.click.assert_not_called()
+
+
+def paged_export(run_browser, first, cursor_page):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.groups.evaluate_all.return_value = [{"user": "Q3", "assistant": "A3"}]
+    target.row.click.side_effect = lambda **k: history(target, first, True, chat=CHAT)
+    target.groups.first.evaluate.side_effect = lambda script, top: top is True and history(target, cursor_page, False, chat=CHAT, cursor=True)
+    result, code = run_browser(target, action="chat_export", chat_id=CHAT)
+    assert code == 0, result
+    return result
+
+
+def test_cursor_page_of_newer_messages_is_ordered_by_rovos_timestamps(run_browser):
+    result = paged_export(run_browser, turns("Q1", "A1"), turns("Q2", "A2", "Q3", "A3", start=2))
+    assert result["coverage"] == "complete"
+    assert [m["text"] for m in result["messages"]] == ["Q1", "A1", "Q2", "A2", "Q3", "A3"]
+
+
+def strip_time(items, n):
+    return [item | {"time_created": None} if i == n else item for i, item in enumerate(items)]
+
+
+@pytest.mark.parametrize("first,cursor_page", [
+    # Pages whose times interleave cannot be ordered.
+    (turns("Q1", "A1", "Q3", "A3", start=0), turns("Q2", "A2", start=1)),
+    # A page without times cannot be placed.
+    (turns("Q2", "A2", start=2), strip_time(turns("Q1", "A1"), 1)),
+])
+def test_pages_rovo_cannot_order_fall_back_to_the_page(run_browser, first, cursor_page):
+    result = paged_export(run_browser, first, cursor_page)
+    assert result["coverage"] == "loaded_only"
+    assert result["messages"] == [{"role": "user", "text": "Q3"}, {"role": "assistant", "text": "A3"}]
+
+
+def test_single_page_needs_no_timestamps(run_browser):
+    target = page_fixture(ORIGIN + "/jira/for-you")
+    target.row.click.side_effect = lambda **k: history(target, strip_time(turns("Q1", "A1"), 0), False, chat=CHAT)
+    result, code = run_browser(target, action="chat_export", chat_id=CHAT)
+    assert code == 0 and result["coverage"] == "complete", result
+    assert [m["text"] for m in result["messages"]] == ["Q1", "A1"]
 
 
 def test_chat_export_without_rovo_data_falls_back_to_the_page_as_loaded_only(run_browser):
