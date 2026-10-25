@@ -3,6 +3,7 @@ import time
 import re
 import sys
 from contextlib import contextmanager, nullcontext
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 from hashlib import sha256
@@ -358,6 +359,29 @@ def message_text(content):
     return "\n".join(text(block) for block in content["content"]).strip()
 
 
+def created(item):
+    """Rovo's own timestamp for one message (RFC 1123, to the second), or None when absent or unreadable."""
+    try:
+        return parsedate_to_datetime(item["time_created"]).timestamp()
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
+def glued(page, earlier):
+    """A chat's messages from one cursor page and the pages before it, in Rovo's own time order,
+    whichever way Rovo pages; None when the timestamps cannot place the page."""
+    if not page or not earlier:
+        return page + earlier
+    first, last, before, after = (message.get("time") for message in (page[0], page[-1], earlier[0], earlier[-1]))
+    if None in (first, last, before, after):
+        return None
+    if last <= before:
+        return page + earlier
+    if after <= first:
+        return earlier + page
+    return None
+
+
 def track_history(page, origin):
     """Rovo's own history responses in this tab, keyed None for the chat list or by chat ID:
     whether more exists, how many items arrived since the first page and, for a chat, its messages.
@@ -375,17 +399,17 @@ def track_history(page, origin):
         try:
             body = response.json()
             more, items = body["hasNext"] is not False, body["items"]
-            messages = [{"id": item.get("id"), "role": item["role"], "text": message_text(item["content"])} for item in items] if key else None
+            messages = [{"id": item.get("id"), "role": item["role"], "text": message_text(item["content"]), "time": created(item)}
+                        for item in items] if key else None
         except (PlaywrightError, ValueError, KeyError, TypeError, AttributeError):
             more, items, messages = True, [], None  # Unreadable counts as more history.
         state = {"more": more, "items": earlier.get("items", 0) + len(items)}
         if key:
-            # ponytail: assumes a cursor page holds older messages; unverified until a chat exceeds one page.
             older = earlier.get("messages", [])
             if messages is not None and older is not None:
                 # A page delivered twice must not duplicate turns.
                 ids = {message["id"] for message in older if message["id"]}
-                messages = [message for message in messages if message["id"] not in ids] + older
+                messages = glued([message for message in messages if message["id"] not in ids], older)
             state["messages"] = messages if older is not None else None
         seen[key] = state
     page.on("response", record)

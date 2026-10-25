@@ -1,5 +1,22 @@
 # Validation status
 
+## Verified history page order (2026-10-25)
+
+When a chat's history arrives in several pages, the CLI used to place each cursor page before the earlier ones, assuming it held older messages. That was never observed. Had Rovo paged the other way, export would have returned scrambled blocks marked `complete`, and reconcile could have matched a repeated prompt's earlier copy and returned its old answer (reproduced offline: exit 0 with the old answer). Pages are now ordered by Rovo's own `time_created`, in whichever direction they arrive. Pages whose times overlap, or that lack times, make export fall back to the page (`loaded_only`) and reconcile report `history_incomplete`. A single page needs no timestamps and is unchanged. A reply-link check was considered and dropped: `parent_message_id` is null on every message.
+
+Read-only scan, 0 questions: all 31 chats in the account fit in one page (largest 60 messages); every message has `time_created`, ascending; `parent_message_id` is always null. The messages endpoint ignores `limit`, `pageSize`, `size` and six other page-size parameters.
+
+Live, installed candidate, 21 questions:
+
+| Step | Result |
+|---|---|
+| 20 `--chat` follow-ups in 4 sessions (turns 31 to 50) | All completed with the right answer and verified continuity; a page probe after each batch still showed one page (70, 80, 90, 100 messages, `hasNext: false`) |
+| `chat export` of the 100-message chat | `coverage: "complete"`, 100 messages, roles alternate, answers in order |
+| Repeat of turn 50's prompt with `--timeout 1` | Exit 3 `timeout`, `turns_before: 50`, empty `partial_answer` |
+| `reconcile` | Exit 0; proved by the new answer's message ID (the last message), not the earlier copy's; `status` then unblocked |
+
+Offline: 383 passed and 16 opt-in skipped; 399 passed with `ROVO_DOM_CHECK=1`; installed 383 with 16 skipped; 15 packaged files and 4 mirrors match. Still unverified live: a chat that actually pages.
+
 ## Verified timeout partial answer (2026-10-24)
 
 A follow-up that timed out reported the previous turn's answer as `partial_answer` (seen live twice). The in-page read took the answer from the panel's last answer card. Rovo renders the new turn's group, with its message ID, before that turn's own card, so the last card was still the previous answer. The read now takes the last group's own cards, as the turn signature already did. A snapshot whose last group is not yet this turn (no new count or message ID, or another prompt) reports no partial answer. Completion is unchanged: it already required a new turn and a matching prompt.
@@ -253,7 +270,7 @@ These checks used incremental installs on macOS. The final development build als
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (over 60 messages), actual Copilot invocation, other operating systems, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (none seen up to 102 messages), actual Copilot invocation, other operating systems, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 
