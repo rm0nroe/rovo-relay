@@ -87,7 +87,7 @@ def test_capture_failure_preserves_answer_and_blocks_implicit_followup(run_brows
     assert read_request(state_dir(tmp_path, ORIGIN, "probe"))["execution_status"] == "completed"
     assert run_browser(prompt=PROMPT)[1] == 1
     target.submit.click.assert_called_once()
-    target.page.close.assert_not_called()
+    target.page.close.assert_called()  # the answer is in Rovo's history
 
 
 def test_verified_answer_tab_closes_at_exit(run_browser):
@@ -210,8 +210,8 @@ def test_automatic_picker_followup_reuses_verified_reads(run_browser, monkeypatc
     result, code = run_browser(existing(), prompt=PROMPT)
     assert code == 0 and result["chat_selection"] == "picker", result
     # Before selection, at the end of opening the chat; history check, post-fill check, capture.
-    # Exit cleanup adds one of each after the answer is returned.
-    assert calls == {"require_idle": 3, "turn_signature": 4}
+    # Exit cleanup checks only for unsent work, so it adds neither.
+    assert calls == {"require_idle": 2, "turn_signature": 3}
 
 
 def test_explicit_chat_skips_repeat_idle_check(run_browser, monkeypatch):
@@ -221,7 +221,7 @@ def test_explicit_chat_skips_repeat_idle_check(run_browser, monkeypatch):
     calls = count_reads(monkeypatch)
     result, code = run_browser(target, prompt=PROMPT, chat_id=CHAT)
     assert code == 0 and result["continuity_status"] == "verified", result
-    assert calls == {"require_idle": 3, "turn_signature": 4}  # includes exit cleanup
+    assert calls == {"require_idle": 2, "turn_signature": 3}
 
 
 @pytest.mark.parametrize("click", [True, False])
@@ -231,7 +231,7 @@ def test_new_chat_rechecks_idle_only_after_a_click(run_browser, monkeypatch, cli
     calls = count_reads(monkeypatch)
     result, code = run_browser(target, prompt=PROMPT)
     assert code == 0 and result["answer"] == "Synthetic answer", result
-    assert calls == {"require_idle": 3 if click else 2, "turn_signature": 2}  # includes exit cleanup
+    assert calls == {"require_idle": 2 if click else 1, "turn_signature": 1}
 
 
 def test_draft_appearing_after_new_chat_click_is_still_blocked(run_browser):

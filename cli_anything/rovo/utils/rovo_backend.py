@@ -30,7 +30,8 @@ class BrowserConnection:
         self.failed = False
         self.diagnostics = {}
         self.targets = {}
-        self.cleanable = set()
+        # Tabs replaced by a fresh one; exit cleanup still considers them.
+        self.retired = []
         # Tabs whose last operation was a successful list or export, which began idle.
         self.browsed = set()
         # Rovo's own paged history responses per owned tab; see track_history.
@@ -59,7 +60,7 @@ class BrowserConnection:
                     approval = ChromeApproval(self.chrome_port)
                     approval.start()
                 phase = "browser_attachment"
-                notice = ("Guarded approval enabled for this connection only; the pointer and foreground app may move."
+                notice = ("Guarded approval enabled for this connection only; it presses Allow without moving the pointer."
                           if approval else "If Chrome asks, approve the connection.")
                 print("Connecting to Chrome (20-second attachment timeout). " + notice,
                       file=sys.stderr, flush=True)
@@ -114,10 +115,15 @@ class BrowserConnection:
             self.diagnostics = {"error_code": "chrome_connection_lost"}
             raise ValueError("Chrome connection lost; this session cannot reconnect.")
 
-    def target(self, origin, session, account):
+    def target(self, origin, session, account, fresh=False):
+        """This session's own tab; fresh=True opens a new one so Rovo fetches its data again,
+        since it does not refetch a chat in a tab that already loaded it."""
         browser = self.get()
         key = (origin, session, account)
         page = self.targets.get(key)
+        if fresh and page is not None:
+            self.retired.append((key, page))
+            page = None
         if page is not None and not page.is_closed():
             try:
                 # stdin can starve Playwright's event loop; drain close/navigation events first.
@@ -139,23 +145,18 @@ class BrowserConnection:
         return page
 
     def __exit__(self, *exc):
-        for (origin, session, _), page in self.targets.items():
+        for (origin, session, _), page in [*self.targets.items(), *self.retired]:
             try:
                 if page.is_closed():
                     continue
-                # Only discard our own idle legacy panel that is verified empty or shows the verified answer.
+                # Rovo keeps the chat server-side, even an answer still generating when the tab closes
+                # (verified live), so only our own legacy panel's unsent draft or attachment would be lost.
                 if page.url.startswith((origin + "/jira/", origin + "/browse/")):
                     panel = resolve_panel(page)
                     if panel is not None and panel.get_attribute("data-testid") == "conversation-assistant.ui.conversation-assistant":
-                        if page in self.browsed:
-                            # The picker can hide the composer; only new work since the read-only operation matters.
-                            safe = not busy(panel)
-                        else:
-                            require_idle(panel)
-                            safe = ((page in self.cleanable
-                                     and panel.get_by_test_id("rovo-chat-message-group").count() == 0
-                                     and panel.get_by_test_id("assistant-response-card-layout").count() == 0)
-                                    or answered(panel, read_request(state_dir(Path.home(), origin, session))))
+                        textbox = panel.get_by_role("textbox")
+                        # The picker can hide the composer after a list or export; otherwise it must be visible to check.
+                        safe = (page in self.browsed or (textbox.count() == 1 and textbox.is_visible())) and not local_work(panel)
                         if safe and page.url.startswith((origin + "/jira/", origin + "/browse/")):
                             page.close()
                             continue
@@ -231,24 +232,21 @@ def page_hidden(locator):
 def owned_window_page(browser):
     """Open the CLI tab in its own unfocused window, never the user's active tab.
 
-    The window sits off-screen but not minimized: hidden pages pause animation frames,
-    and Playwright's click stability check then times out."""
+    The window is parked off-screen but not minimized: hidden pages pause animation frames,
+    and Playwright's click stability check then times out. Its page keeps a desktop viewport."""
     cdp = browser.new_browser_cdp_session()
     try:
         with browser.contexts[0].expect_page() as created:
             target_id = cdp.send("Target.createTarget", {"url": "about:blank", "newWindow": True, "background": True})["targetId"]
         window = cdp.send("Browser.getWindowForTarget", {"targetId": target_id})["windowId"]
-        # ponytail: macOS clamps this to a ~40 px sliver on the main display; a display left of it would show the window.
-        cdp.send("Browser.setWindowBounds", {"windowId": window, "bounds": {"left": -10000, "top": 0, "width": 1440, "height": 900}})
+        # macOS keeps 40 px of any window on screen and Chrome its minimum size (626 x 469 on Chrome 156),
+        # so the smallest window in the bottom-right corner leaves about 40 x 109 px, under other windows.
+        # ponytail: lands on whichever display is bottom-right-most; a zero-pixel window is not possible.
+        cdp.send("Browser.setWindowBounds", {"windowId": window, "bounds": {"left": 10000, "top": 10000, "width": 100, "height": 100}})
     finally:
         cdp.detach()
+    created.value.set_viewport_size({"width": 1440, "height": 900})
     return created.value
-
-
-def answered(panel, record):
-    """The tab shows exactly the last verified answer, so the saved chat holds everything."""
-    return bool(record and record.get("execution_status") == "completed" and record.get("continuity_status") == "verified"
-                and shows_turn(turn_signature(panel), record))
 
 
 def shows_turn(signature, record):
@@ -273,12 +271,16 @@ def resolve_panel(page):
     return panels[0] if panels else None
 
 
-def busy(panel):
-    """Draft, attachment or active response; an absent composer has no draft."""
+def local_work(panel):
+    """Unsent draft or attachment, the only content a closed tab loses; an absent composer has no draft."""
     textbox = panel.get_by_role("textbox")
     draft = textbox.count() > 1 or (textbox.count() == 1 and textbox.evaluate("""el => { const copy = el.cloneNode(true); copy.querySelectorAll('[data-testid="placeholder-test-id"]').forEach(n => n.remove()); return copy.textContent.trim(); }"""))
-    return bool(panel.get_by_role("button", name="Stop generating", exact=True).is_visible() or draft
-                or panel.get_by_role("button", name=re.compile(r"^Remove file ")).count())
+    return bool(draft or panel.get_by_role("button", name=re.compile(r"^Remove file ")).count())
+
+
+def busy(panel):
+    """Draft, attachment or active response."""
+    return bool(panel.get_by_role("button", name="Stop generating", exact=True).is_visible() or local_work(panel))
 
 
 def require_idle(panel):
@@ -658,9 +660,8 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                 record["chat_id"] = chat_id
             base["conversation_mode"] = "continued" if chat_id else "new"
             with (nullcontext(connection) if connection is not None else BrowserConnection(chrome_port, approve_chrome_prompt)) as owner:
-                page = owner.target(origin, session, account)
+                page = owner.target(origin, session, account, fresh=action == "reconcile")
                 lap("attach")
-                owner.cleanable.discard(page)
                 owner.browsed.discard(page)
                 panel, opened = prepare_panel(page, origin, account, owner.diagnostics)
                 lap("prepare")
@@ -682,7 +683,6 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     raise ValueError("Rovo mini-modal detected; generation, attachment and completion controls are unverified. No prompt sent.")
                 stop = panel.get_by_role("button", name="Stop generating", exact=True)
                 if prompt is None and action == "status":
-                    owner.cleanable.add(page)
                     return base | record | {"execution_status": "completed", "readiness": "authenticated_ui",
                                            "active_generation": stop.is_visible(), "prior_request": prior,
                                            "retry_safe": not unresolved(prior)}, 0

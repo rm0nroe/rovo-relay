@@ -1,6 +1,35 @@
 # Validation status
 
-## Verified history page order (2026-10-25)
+## Verified out-of-sight operation (2026-10-24)
+
+Goal: nothing the CLI does should be visible. Three things were: a 40 by 886 pixel strip of the CLI's window at the left screen edge, Chrome's "Allow remote debugging?" prompt with the pointer moving and Chrome pulled to the front on every new connection, and CLI windows left behind after timeouts.
+
+Probes, 0 questions:
+
+| Probe | Result |
+|---|---|
+| CDP `Target.createTarget` with `hidden: true` | Created, but as target type `other`; Playwright drives only pages, so it is unusable here |
+| Window placement on a 1512 by 982 display | macOS keeps 40 px of any window on screen, and Chrome's minimum window is 626 by 469. Bottom-right at minimum size leaves 40 by 109 px, with the page still rendering (122 frames/s at a 1440 by 900 viewport) and a click in 116 ms |
+| Accessibility press of the prompt's buttons (System Events, a sheet on the front Chrome window) | Cancel cleared a stale prompt; Allow approved a live attach in 0.34 s with the pointer and the front app unchanged |
+
+Changes: the window is parked bottom-right at minimum size with a pinned 1440 by 900 viewport; the approval helper presses Allow through Accessibility (every ownership and dialog check is kept; `cliclick` is no longer needed); `rovo-relay-cli broker` holds one approved connection and serves one-shot commands of the same user over an owner-only socket; reconcile always opens a fresh tab, because Rovo does not refetch a chat in a tab that already loaded it (found live through the broker: reconcile saw history from before its own send and refused with `prompt_missing`); and exit cleanup closes the CLI's tab unless an unsent draft or attachment remains.
+
+Live, installed candidates, 7 questions:
+
+| Step | Result |
+|---|---|
+| Broker start | One prompt, approved with 0 pointer moves and no front-app change; socket mode `srw-------` |
+| Through the broker: status, a follow-up ask, a timed-out ask, reconcile, export | 0 prompts, 0 pointer moves, the CLI window only in the corner; `status` 2.3 s instead of a fresh attach. Reconcile first failed (stale tab, above), then after the fix proved both pending answers |
+| A second client while the broker runs | Refused by the approval guard (another client present), as designed |
+| A tab closed while Rovo was still generating (`Stop generating` visible), then reconcile 45 s later | The full answer (eight numbered sentences and the final word) was in Rovo's data |
+| One-shot `ask --timeout 1` without a broker | Exit 3, no CLI window left on screen; reconcile 30 s later proved the full answer |
+| Broker stopped by SIGTERM or idle timeout | Socket removed, no CLI window left on screen |
+
+Measurement note: macOS keeps an off-screen record for a closed window; count only on-screen windows (`kCGWindowListOptionOnScreenOnly`).
+
+Offline: 398 passed and 16 opt-in skipped; 414 passed with `ROVO_DOM_CHECK=1`. Not possible: a fully windowless CLI in the real Chrome profile. Not verified: a display arrangement where the bottom-right corner falls on another monitor.
+
+## Verified history page order (2026-10-24)
 
 When a chat's history arrives in several pages, the CLI used to place each cursor page before the earlier ones, assuming it held older messages. That was never observed. Had Rovo paged the other way, export would have returned scrambled blocks marked `complete`, and reconcile could have matched a repeated prompt's earlier copy and returned its old answer (reproduced offline: exit 0 with the old answer). Pages are now ordered by Rovo's own `time_created`, in whichever direction they arrive. Pages whose times overlap, or that lack times, make export fall back to the page (`loaded_only`) and reconcile report `history_incomplete`. A single page needs no timestamps and is unchanged. A reply-link check was considered and dropped: `parent_message_id` is null on every message.
 
@@ -270,7 +299,7 @@ These checks used incremental installs on macOS. The final development build als
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (none seen up to 102 messages), actual Copilot invocation, other operating systems, headless operation and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (none seen up to 102 messages), actual Copilot invocation, other operating systems and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 

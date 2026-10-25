@@ -50,7 +50,7 @@ def native(monkeypatch):
         calls.append(args)
         if args[0] == "/bin/ps":
             return "30 20\n20 1" if "-axo" in args else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-        return ""
+        return "pressed\n" if args[0] == "/usr/bin/osascript" else ""
 
     monkeypatch.setattr(approval, "command", command)
     dialog = {"kCGWindowName": "Allow remote debugging?", "kCGWindowNumber": 100,
@@ -58,18 +58,19 @@ def native(monkeypatch):
     established = chain([[]], repeat(ROWS))
     monkeypatch.setattr(approval, "sockets", lambda p, state:
                         [(10, "127.0.0.1:9222")] if state == "LISTEN" else next(established))
-    quartz.CGWindowListCopyWindowInfo.side_effect = [[], [dialog], [dialog], [dialog], [dialog], []]
-    return SimpleNamespace(quartz=quartz, calls=calls, dialog=dialog)
+    quartz.CGWindowListCopyWindowInfo.side_effect = [[], [dialog], [dialog], [dialog], []]
+    native = SimpleNamespace(quartz=quartz, calls=calls, dialog=dialog)
+    native.presses = lambda: [c for c in calls if c[0] == "/usr/bin/osascript"]
+    return native
 
 
-def test_native_sequence_clicks_once_after_ownership_checks(native, capsys):
+def test_native_sequence_presses_allow_once_without_pointer_or_focus(native, capsys):
     approval.worker(20, 9222)
     assert json.loads(capsys.readouterr().out) == {"status": "ready"}
-    assert native.quartz.CGEventPost.call_count == 2  # one down/up pair
-    events = native.quartz.CGEventCreateMouseEvent.call_args_list
-    assert [call.args[1] for call in events] == [1, 2]
-    assert all(call.args[2] == (432, 362) for call in events)
-    assert any(c[0] == "/opt/homebrew/bin/cliclick" for c in native.calls)
+    # One Accessibility press of Allow in Chrome's own process: no pointer, no app activation.
+    assert len(native.presses()) == 1 and native.presses()[0][-1] == "10"
+    assert native.quartz.CGEventPost.call_count == 0
+    assert not any("cliclick" in c[0] or "activate" in " ".join(c) or "frontmost" in " ".join(c) for c in native.calls)
 
 
 def test_preexisting_second_agent_prompt_is_untouched(native, capsys):
@@ -77,19 +78,19 @@ def test_preexisting_second_agent_prompt_is_untouched(native, capsys):
     with pytest.raises(approval.GuardFailure, match="busy"):
         approval.worker(20, 9222)
     assert capsys.readouterr().out == ""  # never authorizes attach
-    native.quartz.CGEventPost.assert_not_called()
+    assert native.presses() == []
     assert not any(c[0] != "/bin/ps" for c in native.calls)
 
 
-def test_second_agent_arriving_before_click_is_untouched(native):
+def test_second_agent_arriving_before_press_is_untouched(native):
     other = native.dialog | {"kCGWindowNumber": 101}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [native.dialog], [native.dialog, other]]
+    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [native.dialog, other]]
     with pytest.raises(approval.GuardFailure):
         approval.worker(20, 9222)
-    native.quartz.CGEventPost.assert_not_called()
+    assert native.presses() == []
 
 
-def test_foreign_socket_stops_before_pointer_moves(native, monkeypatch):
+def test_foreign_socket_stops_before_press(native, monkeypatch):
     rows = iter([[], ROWS, ROWS])
     monkeypatch.setattr(approval, "sockets", lambda p, state:
                         [(10, "127.0.0.1:9222")] if state == "LISTEN" else next(rows))
@@ -97,16 +98,21 @@ def test_foreign_socket_stops_before_pointer_moves(native, monkeypatch):
     monkeypatch.setattr(approval, "command", lambda args: "30 99" if "-axo" in args else original(args))
     with pytest.raises(approval.GuardFailure, match="busy"):
         approval.worker(20, 9222)
-    native.quartz.CGEventPost.assert_not_called()
-    assert not any(c[0] == "/opt/homebrew/bin/cliclick" for c in native.calls)
+    assert native.presses() == []
 
 
-def test_moved_dialog_after_click_does_not_report_success(native):
-    moved = native.dialog | {"kCGWindowBounds": dict(X=101, Y=200, Width=400, Height=200)}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [native.dialog], [native.dialog], [moved]]
+def test_dialog_still_open_after_press_does_not_report_success(native):
+    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [native.dialog], [native.dialog]]
     with pytest.raises(approval.GuardFailure, match="changed"):
         approval.worker(20, 9222)
-    assert native.quartz.CGEventPost.call_count == 2
+    assert len(native.presses()) == 1
+
+
+def test_allow_not_found_by_accessibility_is_not_success(native, monkeypatch):
+    original = approval.command
+    monkeypatch.setattr(approval, "command", lambda args: "not found" if args[0] == "/usr/bin/osascript" else original(args))
+    with pytest.raises(approval.GuardFailure, match="changed"):
+        approval.worker(20, 9222)
 
 
 @pytest.fixture
@@ -179,12 +185,11 @@ def test_missing_port_fails_before_starting_helper(monkeypatch):
     popen.assert_not_called()
 
 
-def test_missing_native_dependency_never_signals_ready_or_clicks(native, monkeypatch, capsys):
-    monkeypatch.setattr(approval.os, "access", lambda *a: False)
-    with pytest.raises(approval.GuardFailure, match="dependencies"):
+def test_missing_native_dependency_never_signals_ready_or_presses(native, monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "Quartz", None)
+    with pytest.raises(ImportError):
         approval.worker(20, 9222)
-    assert capsys.readouterr().out == ""
-    native.quartz.CGEventPost.assert_not_called()
+    assert capsys.readouterr().out == "" and native.presses() == []
 
 
 def test_no_dialog_times_out_without_click(native, monkeypatch):
@@ -193,7 +198,7 @@ def test_no_dialog_times_out_without_click(native, monkeypatch):
     monkeypatch.setattr(approval.time, "monotonic", iter([0, 18]).__next__)
     with pytest.raises(approval.GuardFailure, match="timeout"):
         approval.worker(20, 9222)
-    native.quartz.CGEventPost.assert_not_called()
+    assert native.presses() == []
 
 
 def test_unresolved_delivery_blocks_before_helper(browser_env, helper, monkeypatch, capsys, tmp_path):
@@ -225,26 +230,19 @@ def test_nonzero_helper_exit_blocks_even_with_success_output(monkeypatch):
         helper.finish()
 
 
-def test_same_sheet_can_settle_before_pointer_is_parked(native):
+def test_same_sheet_can_settle_before_the_press(native):
     moved = native.dialog | {"kCGWindowBounds": dict(X=100, Y=217, Width=400, Height=200)}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [moved], [moved], [moved], []]
+    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [moved], [moved], []]
     approval.worker(20, 9222)
-    assert [c.args[2] for c in native.quartz.CGEventCreateMouseEvent.call_args_list] == [(432, 379)] * 2
-    assert ["/opt/homebrew/bin/cliclick", "m:432,379"] in native.calls
+    assert len(native.presses()) == 1
 
 
-def test_replacement_sheet_before_parking_is_never_clicked(native):
+@pytest.mark.parametrize("late", [1, 2])
+def test_replacement_or_moved_sheet_before_the_press_is_never_pressed(native, late):
     replacement = native.dialog | {"kCGWindowNumber": 101}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [replacement]]
-    with pytest.raises(approval.GuardFailure, match="changed"):
-        approval.worker(20, 9222)
-    native.quartz.CGEventPost.assert_not_called()
-    assert not any(c[0] == "/opt/homebrew/bin/cliclick" for c in native.calls)
-
-
-def test_sheet_movement_after_parking_still_blocks(native):
     moved = native.dialog | {"kCGWindowBounds": dict(X=100, Y=217, Width=400, Height=200)}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [moved]]
+    native.quartz.CGWindowListCopyWindowInfo.side_effect = (
+        [[], [native.dialog], [replacement]] if late == 1 else [[], [native.dialog], [native.dialog], [moved]])
     with pytest.raises(approval.GuardFailure, match="changed"):
         approval.worker(20, 9222)
-    native.quartz.CGEventPost.assert_not_called()
+    assert native.presses() == []

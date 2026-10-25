@@ -80,7 +80,7 @@ class ChromeApproval:
 REASONS = {
     "busy": "Chrome approval is ambiguous: another debugging prompt or client is present. Leave it alone; stop other automation before a new read-only connection.",
     "listener": "The verified port must have exactly one normal Google Chrome loopback listener.",
-    "dependencies": "Chrome approval needs system Python with Quartz, cliclick, and terminal Accessibility/Automation permissions.",
+    "dependencies": "Chrome approval needs system Python with Quartz and terminal Accessibility/Automation permissions.",
     "timeout": "No uniquely owned Chrome approval prompt appeared within 17 seconds; nothing was clicked.",
     "changed": "Chrome approval prompt changed or remained open; no additional click is allowed.",
     "cancelled": "Chrome attachment ended before approval; nothing further was clicked.",
@@ -136,6 +136,28 @@ def one_dialog(dialogs, chrome_pid, expected=None):
     return dialogs[0]
 
 
+# Chrome shows the prompt as a sheet named after it; Allow is found by role and name.
+PRESS_ALLOW = """on run argv
+  tell application "System Events" to tell (first process whose unix id is ((item 1 of argv) as integer))
+    repeat with w in (get windows)
+      repeat with s in (get sheets of w)
+        if name of s is "Allow remote debugging?" then
+          set es to (get entire contents of s)
+          repeat with i from 1 to count of es
+            set e to item i of es
+            if role of e is "AXButton" and name of e is "Allow" then
+              click e
+              return "pressed"
+            end if
+          end repeat
+        end if
+      end repeat
+    end repeat
+  end tell
+  return "not found"
+end run"""
+
+
 def worker(caller_pid, port):
     import Quartz
 
@@ -161,8 +183,6 @@ def worker(caller_pid, port):
         if not owned_socket(sockets(port, "ESTABLISHED"), port, chrome_pid, caller_pid, parents):
             raise GuardFailure("busy")
 
-    if not os.access("/opt/homebrew/bin/cliclick", os.X_OK):
-        raise GuardFailure("dependencies")
     listeners = sockets(port, "LISTEN")
     if len(listeners) != 1 or listeners[0][1] != "127.0.0.1:" + str(port):
         raise GuardFailure("listener")
@@ -187,33 +207,20 @@ def worker(caller_pid, port):
         if current:
             selected = one_dialog(current, chrome_pid)
             check_socket()
-            command(["/usr/bin/osascript", "-e", 'tell application "Finder" to activate'])
+            # Chrome's sheet can move while appearing. Refresh only the same window; the press
+            # is by name, not position, so a settled position is fine.
             time.sleep(0.4)
-            # Chrome's sheet can move while appearing. Refresh only the same window,
-            # before parking the pointer; movement afterward still forbids the click.
             settled = one_dialog(dialogs(), chrome_pid)
             if settled[:2] != selected[:2]:
                 raise GuardFailure("changed")
-            selected = settled
             check_socket()
-            _, _, x, y, width, height = selected
-            point = (x + width - 68, y + height - 38)
-            command(["/opt/homebrew/bin/cliclick", "m:%s,%s" % point])
-            time.sleep(0.4)
-            one_dialog(dialogs(), chrome_pid, selected)
-            check_socket()
-            command(["/usr/bin/osascript", "-e", 'tell application "System Events" to set frontmost of (first process whose unix id is %d) to true' % chrome_pid])
-            time.sleep(0.8)
-            # Recheck immediately before the sole click. A new/moved dialog is not clicked.
+            # Recheck immediately before the sole press. A new or moved dialog is not pressed.
             if cancelled():
                 raise GuardFailure("changed")
-            check_socket()
-            one_dialog(dialogs(), chrome_pid, selected)
-            for event_type in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
-                event = Quartz.CGEventCreateMouseEvent(None, event_type, point, Quartz.kCGMouseButtonLeft)
-                Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, 1)
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-                time.sleep(0.1)
+            one_dialog(dialogs(), chrome_pid, settled)
+            # An Accessibility press of Allow in Chrome's own process: no pointer, no app activation.
+            if command(["/usr/bin/osascript", "-e", PRESS_ALLOW, str(chrome_pid)]).strip() != "pressed":
+                raise GuardFailure("changed")
             time.sleep(0.3)
             if dialogs():
                 raise GuardFailure("changed")
