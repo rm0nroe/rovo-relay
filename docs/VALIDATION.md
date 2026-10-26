@@ -6,7 +6,7 @@ Goal: guarded approval without extra Python packages. The helper ran on system `
 
 Change: the helper finds the prompt through System Events, like the press it already made, so it needs only Accessibility (plus Automation of System Events) for the app running the CLI. It runs on the CLI's own interpreter; `allow.sh` is removed.
 
-Live, 0 questions: a one-shot `status` with `--approve-chrome-prompt`, while a watcher polled the new lookup. The prompt appeared as a sheet on the front Chrome window, disappeared, and `status` returned `authenticated_ui`; no CLI window or debugging client remained. Offline: 400 passed from source and from the installed wheel.
+Live, 0 questions: a one-shot `status` with `--approve-chrome-prompt`, while a watcher polled the new lookup. The prompt appeared as a sheet on the front Chrome window, disappeared, and `status` returned `authenticated_ui`; no CLI window or debugging client remained. The minimal update check then ran exactly as written, 2 questions, from a fresh regular install: the broker took its port from `lsof` (Chrome had written no `DevToolsActivePort`) and was approved with no click; the multi-line new chat, the timed-out follow-up (exit 3, empty `partial_answer`), reconcile (`orbit-5826`), list (complete) and export (complete, 4 messages) all passed through it, and SIGTERM removed the socket with no CLI window left. It also showed that a timeout result carries `next: stop`, so the check's step 3 now expects that. Offline: 400 passed from source and from the installed wheel.
 
 ## Verified out-of-sight operation (2026-10-24)
 
