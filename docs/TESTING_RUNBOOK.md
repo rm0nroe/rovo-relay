@@ -132,7 +132,7 @@ installed = Path(cli_anything.rovo.__file__).resolve().parent
 assert installed != source.resolve(), 'Checkout is masking the installed package'
 expected = {p.relative_to(source) for p in source.rglob('*.py')
             if 'tests' not in p.relative_to(source).parts}
-expected |= {Path('README.md'), Path('utils/allow.sh')}
+expected |= {Path('README.md')}
 expected |= {p.relative_to(source) for p in (source / 'skills').glob('*.md')}
 actual = {p.relative_to(installed) for p in installed.rglob('*')
           if p.is_file() and '__pycache__' not in p.parts}
@@ -296,6 +296,6 @@ These counts describe specific candidates, not permanent expected totals. Synthe
 
 ## Guarded Chrome approval acceptance
 
-Use a build whose `doctor` lists `guarded Chrome prompt approval`. Verify the installed wheel includes `utils/allow.sh` and `utils/chrome_approval.py`. Offline tests must cover an existing foreign prompt, a foreign socket, a second prompt arriving before the click, changed window identity/bounds, missing prerequisites, and helper failure before any page or Submit action. Keep manual mode and MCP fallback guard tests green.
+Use a build whose `doctor` lists `guarded Chrome prompt approval`. Verify the installed wheel includes `utils/chrome_approval.py`. Offline tests must cover an existing foreign prompt, a foreign socket, a second prompt arriving before the click, changed window identity/bounds, missing prerequisites, and helper failure before any page or Submit action. Keep manual mode and MCP fallback guard tests green.
 
 With explicit authorization and the target’s existing debugging port verified, start one retained `session` with `--chrome-port PORT --approve-chrome-prompt`. Do not run a separate approval helper. Save startup JSON and confirm authenticated idle readiness with no human click. Only if a live question is authorized, send one synthetic prompt once and verify completion. Never retry an uncertain ask. A second-agent prompt test is read-only: leave that prompt pending, start the guarded connection, require `chrome_approval_failed` before a new attachment, and verify the other prompt remains untouched. Stop only test-owned processes and close only test-owned tabs; preserve evidence outside Git. Do not change policy to manufacture a failure.
