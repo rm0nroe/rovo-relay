@@ -107,10 +107,11 @@ def page_fixture(url, *, panel_open=True, authenticated=True, draft="",
         "chat-history-status-live-region": status,
         "chat-history-container": history,
         "chat-conversation-list-refresh-row-12345678-1234-4234-8234-123456789abc": row,
+        # Rovo's empty-chat container; its greeting text varies with personalization.
+        "rovo-empty-state": welcome,
     }.__getitem__
     panel.get_by_role.side_effect = lambda role, name=None, **kw: (
-        textbox if role == "textbox" else welcome if role == "heading" and name.search("How can I help, Fixture?")
-        else attachments if not isinstance(name, str)
+        textbox if role == "textbox" else attachments if not isinstance(name, str)
         else named(name)
     )
     # Upload chips are named after each file; tests may preseed one to change its behavior.

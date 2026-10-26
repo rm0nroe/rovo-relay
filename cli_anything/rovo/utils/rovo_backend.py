@@ -762,7 +762,8 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         idle_checked = False
                         page.wait_for_function("""() => document.querySelectorAll('[data-testid="assistant-response-card-layout"]').length === 0""")
                     else:
-                        welcome = panel.get_by_role("heading", name=re.compile(r"^How can I help(?:, .+)?\?$"))
+                        # Rovo's own empty-chat container: its greeting is one of many personalized texts.
+                        welcome = panel.get_by_test_id("rovo-empty-state")
                         submit = panel.get_by_role("button", name="Submit", exact=True)
                         submit_visible = submit.is_visible()
                         failed = [name for name, bad in (
@@ -775,9 +776,6 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                         ) if bad]
                         if failed:
                             base["empty_chat_failed"] = failed
-                            if "welcome" in failed:
-                                # Text before any comma only: Rovo greets by name.
-                                base["panel_headings"] = [text.split(",")[0][:80] for text in panel.locator("h1, h2, h3").all_inner_texts()][:10]
                             raise ValueError(f"New chat is unavailable; empty-chat state is unverified ({', '.join(failed)}). No prompt sent.")
                 lap("select")
                 before = responses.count()

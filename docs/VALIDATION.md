@@ -1,5 +1,9 @@
 # Validation status
 
+## Verified personalized greeting (2026-10-26)
+
+Rovo picks its empty-chat greeting from 85 personalized texts ("Let's get to work, {name}", "What's top of mind, {name}?" and others). The empty-chat check accepted only "How can I help, {name}?", so with another greeting it refused a real empty chat with "New chat is unavailable; empty-chat state is unverified" and sent nothing. It now checks Rovo's own `rovo-empty-state` container, and the error names each failed check in `empty_chat_failed`. Every other empty-chat condition is unchanged. Live, 1 question: `ask --new` from an empty chat completed, verified, with the exact answer. Offline: 400 passed.
+
 ## Verified approval without Quartz (2026-10-26)
 
 Goal: guarded approval without extra Python packages. The helper ran on system `/usr/bin/python3` and needed Quartz, which macOS does not ship, so without a hand-installed pyobjc it failed preflight with `dependencies`. Quartz only found the prompt window, and reading other apps' window names also needs Screen Recording.
