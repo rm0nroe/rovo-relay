@@ -495,6 +495,11 @@ def test_disabled_new_chat_rejects_unverified_empty_states(run_browser, tmp_path
     assert result["submission_state"] == "not_attempted" and result["retry_safe"] is True
     if state == "mini_modal":
         assert result["error_code"] == "rovo_layout_unverified"
+    expected = {"turn": "turns", "response": "responses", "missing_welcome": "welcome", "hidden_welcome": "welcome",
+                "duplicate_welcome": "welcome", "hidden_new_chat": "new_chat_hidden", "hidden_submit": "submit_hidden",
+                "enabled_submit": "submit_enabled"}.get(state)
+    if expected:
+        assert expected in result["empty_chat_failed"] and expected in result["message"], result
     target.new_chat.click.assert_not_called()
     target.textbox.fill.assert_not_called()
     target.submit.click.assert_not_called()

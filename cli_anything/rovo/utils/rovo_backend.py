@@ -764,10 +764,21 @@ def operate(origin, session, account, prompt=None, timeout=180, images=(), githu
                     else:
                         welcome = panel.get_by_role("heading", name=re.compile(r"^How can I help(?:, .+)?\?$"))
                         submit = panel.get_by_role("button", name="Submit", exact=True)
-                        if (not new_chat.is_visible() or welcome.count() != 1 or not welcome.is_visible()
-                                or responses.count() != 0 or panel.get_by_test_id("rovo-chat-message-group").count() != 0
-                                or not submit.is_visible() or submit.is_enabled()):
-                            raise ValueError("New chat is unavailable; empty-chat state is unverified. No prompt sent.")
+                        submit_visible = submit.is_visible()
+                        failed = [name for name, bad in (
+                            ("new_chat_hidden", not new_chat.is_visible()),
+                            ("welcome", welcome.count() != 1 or not welcome.is_visible()),
+                            ("responses", responses.count() != 0),
+                            ("turns", panel.get_by_test_id("rovo-chat-message-group").count() != 0),
+                            ("submit_hidden", not submit_visible),
+                            ("submit_enabled", submit_visible and submit.is_enabled()),
+                        ) if bad]
+                        if failed:
+                            base["empty_chat_failed"] = failed
+                            if "welcome" in failed:
+                                # Text before any comma only: Rovo greets by name.
+                                base["panel_headings"] = [text.split(",")[0][:80] for text in panel.locator("h1, h2, h3").all_inner_texts()][:10]
+                            raise ValueError(f"New chat is unavailable; empty-chat state is unverified ({', '.join(failed)}). No prompt sent.")
                 lap("select")
                 before = responses.count()
                 # Message IDs the chat already has: a different one on the last turn is a new turn.
