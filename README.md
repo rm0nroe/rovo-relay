@@ -28,7 +28,7 @@ python -m pip install .
 rovo-relay-cli --json doctor
 ```
 
-The command can then run from any directory while that environment is active. Version 0.1.0a5 names the command `rovo-relay-cli`; `rovo-relay` remains a compatibility alias. The Python distribution remains `rovo-relay`, so upgrading the existing installation replaces the same package. Version 0.1.0a3 adds persistent sessions; 0.1.0a4 adds explicit loopback port selection when Chrome lacks a discovery file. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
+The command can then run from any directory while that environment is active. To stop repeating `--site` and `--account`, set `ROVO_RELAY_SITE` and `ROVO_RELAY_ACCOUNT` once (for example in `~/.zshrc`, or with `setx` on Windows, then open a new terminal); explicit flags still win. Version 0.1.0a5 names the command `rovo-relay-cli`; `rovo-relay` remains a compatibility alias. The Python distribution remains `rovo-relay`, so upgrading the existing installation replaces the same package. Version 0.1.0a3 adds persistent sessions; 0.1.0a4 adds explicit loopback port selection when Chrome lacks a discovery file. Windows and Linux browser behavior have not been accepted. No Playwright browser download is required for the existing-Chrome mode.
 
 
 ### Chrome connection setup

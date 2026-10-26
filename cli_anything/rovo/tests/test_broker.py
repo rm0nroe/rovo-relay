@@ -179,3 +179,18 @@ def test_request_without_a_result_does_not_stop_the_broker(fake):
             return json.loads(client.makefile().readline())["code"]
     code, results = serve(home, [lambda: raw([*SITE, "status", "--help"]), one_shot("status"), stop])
     assert results == [1, 0, 0], results
+
+
+def test_site_and_account_default_from_the_environment(monkeypatch, capsys):
+    monkeypatch.setenv("ROVO_RELAY_SITE", "https://example.atlassian.net/jira")
+    monkeypatch.setenv("ROVO_RELAY_ACCOUNT", "user@example.com")
+    assert rovo_cli.run(["--dry-run", "--session", "probe", "status"]) == 0
+    # Explicit flags win over the environment, in either option spelling.
+    assert rovo_cli.run(["--dry-run", "--site=https://other.atlassian.net", "--session", "probe", "status"]) == 0
+    assert [json.loads(line)["site"] for line in capsys.readouterr().out.splitlines()] == [
+        "https://example.atlassian.net", "https://other.atlassian.net"]
+    # Defaults are expanded before forwarding, so a broker serves the caller's values, not its own.
+    assert rovo_cli.with_env_defaults(["status"]) == [
+        "--site", "https://example.atlassian.net/jira", "--account", "user@example.com", "status"]
+    monkeypatch.delenv("ROVO_RELAY_ACCOUNT")
+    assert rovo_cli.run(["--dry-run", "--session", "probe", "status"]) == 1
