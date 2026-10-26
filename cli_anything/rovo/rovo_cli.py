@@ -249,7 +249,17 @@ def forward(args):
                            "retry_safe": False, "message": "Broker ended before replying; run status before anything else, never resubmit."}, 3))
 
 
+ENV_DEFAULTS = (("--site", "ROVO_RELAY_SITE"), ("--account", "ROVO_RELAY_ACCOUNT"))
+
+
+def with_env_defaults(args):
+    """Prefix --site/--account from the environment unless given; expanded here so a broker gets the caller's values."""
+    return [arg for opt, var in ENV_DEFAULTS if os.environ.get(var)
+            and not any(a == opt or a.startswith(opt + "=") for a in args) for arg in (opt, os.environ[var])] + args
+
+
 def run(args):
+    args = with_env_defaults(args)
     result = forward(args) or invoke(args)
     return emit(result) if isinstance(result, tuple) else result or 0
 
