@@ -23,8 +23,9 @@ class ChromeApproval:
     def start(self):
         if sys.platform != "darwin" or not self.port:
             raise ApprovalError("Automatic Chrome approval requires macOS and a verified --chrome-port.")
+        # Standard library only, so the CLI's own interpreter runs it; no system Python or Quartz.
         self.process = subprocess.Popen(
-            ["/bin/bash", str(Path(__file__).with_name("allow.sh")), str(os.getpid()), str(self.port)],
+            [sys.executable, "-I", str(Path(__file__)), str(os.getpid()), str(self.port)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             bufsize=0, start_new_session=True,
         )
@@ -80,7 +81,7 @@ class ChromeApproval:
 REASONS = {
     "busy": "Chrome approval is ambiguous: another debugging prompt or client is present. Leave it alone; stop other automation before a new read-only connection.",
     "listener": "The verified port must have exactly one normal Google Chrome loopback listener.",
-    "dependencies": "Chrome approval needs system Python with Quartz and terminal Accessibility/Automation permissions.",
+    "dependencies": "Chrome approval needs Accessibility (and Automation of System Events) for the app running the CLI, such as VS Code or Terminal.",
     "timeout": "No uniquely owned Chrome approval prompt appeared within 17 seconds; nothing was clicked.",
     "changed": "Chrome approval prompt changed or remained open; no additional click is allowed.",
     "cancelled": "Chrome attachment ended before approval; nothing further was clicked.",
@@ -136,7 +137,27 @@ def one_dialog(dialogs, chrome_pid, expected=None):
     return dialogs[0]
 
 
-# Chrome shows the prompt as a sheet named after it; Allow is found by role and name.
+# Chrome shows the prompt as a sheet named after it, found through Accessibility (no Screen Recording).
+# One line per sheet: its window's bounds (identifies the window), then the sheet's position and size.
+FIND_DIALOGS = """on run argv
+  set out to ""
+  tell application "System Events" to tell (first process whose unix id is ((item 1 of argv) as integer))
+    repeat with w in (get windows)
+      repeat with s in (get sheets of w)
+        if name of s is "Allow remote debugging?" then
+          set {wx, wy} to position of w
+          set {ww, wh} to size of w
+          set {x, y} to position of s
+          set {sw, sh} to size of s
+          set out to out & wx & "," & wy & "," & ww & "," & wh & " " & x & " " & y & " " & sw & " " & sh & linefeed
+        end if
+      end repeat
+    end repeat
+  end tell
+  return out
+end run"""
+
+# Allow is found by role and name.
 PRESS_ALLOW = """on run argv
   tell application "System Events" to tell (first process whose unix id is ((item 1 of argv) as integer))
     repeat with w in (get windows)
@@ -159,15 +180,13 @@ end run"""
 
 
 def worker(caller_pid, port):
-    import Quartz
-
     def dialogs():
+        # Only the verified Chrome process can own the prompt for this port; osascript exits nonzero
+        # without Accessibility, which reports "dependencies" before the helper signals ready.
         result = []
-        for window in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID):
-            if window.get("kCGWindowName") == "Allow remote debugging?":
-                b = window["kCGWindowBounds"]
-                result.append((int(window["kCGWindowNumber"]), int(window["kCGWindowOwnerPID"]),
-                               int(b["X"]), int(b["Y"]), int(b["Width"]), int(b["Height"])))
+        for line in command(["/usr/bin/osascript", "-e", FIND_DIALOGS, str(chrome_pid)]).splitlines():
+            window, *bounds = line.split()
+            result.append((window, chrome_pid, *(int(float(n)) for n in bounds)))
         return result
 
     def cancelled():

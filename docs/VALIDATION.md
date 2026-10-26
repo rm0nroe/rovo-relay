@@ -1,5 +1,13 @@
 # Validation status
 
+## Verified approval without Quartz (2026-10-26)
+
+Goal: guarded approval without extra Python packages. The helper ran on system `/usr/bin/python3` and needed Quartz, which macOS does not ship, so without a hand-installed pyobjc it failed preflight with `dependencies`. Quartz only found the prompt window, and reading other apps' window names also needs Screen Recording.
+
+Change: the helper finds the prompt through System Events, like the press it already made, so it needs only Accessibility (plus Automation of System Events) for the app running the CLI. It runs on the CLI's own interpreter; `allow.sh` is removed.
+
+Live, 0 questions: a one-shot `status` with `--approve-chrome-prompt`, while a watcher polled the new lookup. The prompt appeared as a sheet on the front Chrome window, disappeared, and `status` returned `authenticated_ui`; no CLI window or debugging client remained. Offline: 400 passed from source and from the installed wheel.
+
 ## Verified out-of-sight operation (2026-10-24)
 
 Goal: nothing the CLI does should be visible. Three things were: a 40 by 886 pixel strip of the CLI's window at the left screen edge, Chrome's "Allow remote debugging?" prompt with the pointer moving and Chrome pulled to the front on every new connection, and CLI windows left behind after timeouts.

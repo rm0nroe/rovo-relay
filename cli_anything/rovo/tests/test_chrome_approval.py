@@ -35,32 +35,33 @@ def test_changed_or_ambiguous_dialog_is_never_accepted(dialogs):
         approval.one_dialog(dialogs, 10, DIALOG)
 
 
+def sheets(*dialogs):
+    """FIND_DIALOGS output: parent window bounds, then the sheet's position and size."""
+    return "\n".join(f"{d['window']} {d['x']} {d['y']} {d['w']} {d['h']}" for d in dialogs)
+
+
 @pytest.fixture
 def native(monkeypatch):
-    quartz = MagicMock()
-    quartz.kCGEventLeftMouseDown = 1
-    quartz.kCGEventLeftMouseUp = 2
-    monkeypatch.setitem(sys.modules, "Quartz", quartz)
-    monkeypatch.setattr(approval.os, "access", lambda *a: True)
     monkeypatch.setattr(approval.select, "select", lambda *a: ([], [], []))
     monkeypatch.setattr(approval.time, "sleep", lambda *a: None)
     calls = []
+    dialog = {"window": "0,25,1440,875", "x": 100, "y": 200, "w": 400, "h": 200}
+    native = SimpleNamespace(calls=calls, dialog=dialog, found=iter([[], [dialog], [dialog], [dialog], []]))
 
     def command(args):
         calls.append(args)
         if args[0] == "/bin/ps":
             return "30 20\n20 1" if "-axo" in args else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-        return "pressed\n" if args[0] == "/usr/bin/osascript" else ""
+        if args[:3] == ["/usr/bin/osascript", "-e", approval.FIND_DIALOGS]:
+            assert args[3] == "10"  # only the verified Chrome process is inspected
+            return sheets(*next(native.found))
+        return "pressed" if args[0] == "/usr/bin/osascript" else ""
 
     monkeypatch.setattr(approval, "command", command)
-    dialog = {"kCGWindowName": "Allow remote debugging?", "kCGWindowNumber": 100,
-              "kCGWindowOwnerPID": 10, "kCGWindowBounds": dict(X=100, Y=200, Width=400, Height=200)}
     established = chain([[]], repeat(ROWS))
     monkeypatch.setattr(approval, "sockets", lambda p, state:
                         [(10, "127.0.0.1:9222")] if state == "LISTEN" else next(established))
-    quartz.CGWindowListCopyWindowInfo.side_effect = [[], [dialog], [dialog], [dialog], []]
-    native = SimpleNamespace(quartz=quartz, calls=calls, dialog=dialog)
-    native.presses = lambda: [c for c in calls if c[0] == "/usr/bin/osascript"]
+    native.presses = lambda: [c for c in calls if c[:3] == ["/usr/bin/osascript", "-e", approval.PRESS_ALLOW]]
     return native
 
 
@@ -69,22 +70,20 @@ def test_native_sequence_presses_allow_once_without_pointer_or_focus(native, cap
     assert json.loads(capsys.readouterr().out) == {"status": "ready"}
     # One Accessibility press of Allow in Chrome's own process: no pointer, no app activation.
     assert len(native.presses()) == 1 and native.presses()[0][-1] == "10"
-    assert native.quartz.CGEventPost.call_count == 0
     assert not any("cliclick" in c[0] or "activate" in " ".join(c) or "frontmost" in " ".join(c) for c in native.calls)
 
 
 def test_preexisting_second_agent_prompt_is_untouched(native, capsys):
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[native.dialog]]
+    native.found = iter([[native.dialog]])
     with pytest.raises(approval.GuardFailure, match="busy"):
         approval.worker(20, 9222)
     assert capsys.readouterr().out == ""  # never authorizes attach
     assert native.presses() == []
-    assert not any(c[0] != "/bin/ps" for c in native.calls)
 
 
 def test_second_agent_arriving_before_press_is_untouched(native):
-    other = native.dialog | {"kCGWindowNumber": 101}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [native.dialog, other]]
+    other = native.dialog | {"window": "1440,25,1440,875"}
+    native.found = iter([[], [native.dialog], [native.dialog], [native.dialog, other]])
     with pytest.raises(approval.GuardFailure):
         approval.worker(20, 9222)
     assert native.presses() == []
@@ -102,7 +101,7 @@ def test_foreign_socket_stops_before_press(native, monkeypatch):
 
 
 def test_dialog_still_open_after_press_does_not_report_success(native):
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [native.dialog], [native.dialog], [native.dialog]]
+    native.found = iter([[], [native.dialog], [native.dialog], [native.dialog], [native.dialog]])
     with pytest.raises(approval.GuardFailure, match="changed"):
         approval.worker(20, 9222)
     assert len(native.presses()) == 1
@@ -110,7 +109,7 @@ def test_dialog_still_open_after_press_does_not_report_success(native):
 
 def test_allow_not_found_by_accessibility_is_not_success(native, monkeypatch):
     original = approval.command
-    monkeypatch.setattr(approval, "command", lambda args: "not found" if args[0] == "/usr/bin/osascript" else original(args))
+    monkeypatch.setattr(approval, "command", lambda args: "not found" if args[2:3] == [approval.PRESS_ALLOW] else original(args))
     with pytest.raises(approval.GuardFailure, match="changed"):
         approval.worker(20, 9222)
 
@@ -185,16 +184,33 @@ def test_missing_port_fails_before_starting_helper(monkeypatch):
     popen.assert_not_called()
 
 
-def test_missing_native_dependency_never_signals_ready_or_presses(native, monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "Quartz", None)
-    with pytest.raises(ImportError):
+def test_missing_accessibility_never_signals_ready_or_presses(native, monkeypatch, capsys):
+    original = approval.command
+
+    def denied(args):
+        if args[2:3] == [approval.FIND_DIALOGS]:
+            raise approval.GuardFailure("dependencies")  # osascript exits nonzero without Accessibility
+        return original(args)
+    monkeypatch.setattr(approval, "command", denied)
+    with pytest.raises(approval.GuardFailure, match="dependencies"):
         approval.worker(20, 9222)
     assert capsys.readouterr().out == "" and native.presses() == []
 
 
+def test_helper_runs_on_this_python_without_quartz(monkeypatch):
+    monkeypatch.setattr(approval.sys, "platform", "darwin")
+    popen = MagicMock()
+    popen.return_value.stdout.readline.return_value = '{"status": "ready"}'
+    monkeypatch.setattr(approval.subprocess, "Popen", popen)
+    monkeypatch.setattr(approval.select, "select", lambda r, *a: (r, [], []))
+    approval.ChromeApproval(9222).start()
+    args = popen.call_args.args[0]
+    assert args[0] == sys.executable and args[-3].endswith("chrome_approval.py")
+    assert "import Quartz" not in open(approval.__file__).read()
+
+
 def test_no_dialog_times_out_without_click(native, monkeypatch):
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = None
-    native.quartz.CGWindowListCopyWindowInfo.return_value = []
+    native.found = repeat([])
     monkeypatch.setattr(approval.time, "monotonic", iter([0, 18]).__next__)
     with pytest.raises(approval.GuardFailure, match="timeout"):
         approval.worker(20, 9222)
@@ -231,17 +247,17 @@ def test_nonzero_helper_exit_blocks_even_with_success_output(monkeypatch):
 
 
 def test_same_sheet_can_settle_before_the_press(native):
-    moved = native.dialog | {"kCGWindowBounds": dict(X=100, Y=217, Width=400, Height=200)}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = [[], [native.dialog], [moved], [moved], []]
+    moved = native.dialog | {"y": 217}
+    native.found = iter([[], [native.dialog], [moved], [moved], []])
     approval.worker(20, 9222)
     assert len(native.presses()) == 1
 
 
 @pytest.mark.parametrize("late", [1, 2])
 def test_replacement_or_moved_sheet_before_the_press_is_never_pressed(native, late):
-    replacement = native.dialog | {"kCGWindowNumber": 101}
-    moved = native.dialog | {"kCGWindowBounds": dict(X=100, Y=217, Width=400, Height=200)}
-    native.quartz.CGWindowListCopyWindowInfo.side_effect = (
+    replacement = native.dialog | {"window": "1440,25,1440,875"}
+    moved = native.dialog | {"y": 217}
+    native.found = iter(
         [[], [native.dialog], [replacement]] if late == 1 else [[], [native.dialog], [native.dialog], [moved]])
     with pytest.raises(approval.GuardFailure, match="changed"):
         approval.worker(20, 9222)
