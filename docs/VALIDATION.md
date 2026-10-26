@@ -2,7 +2,7 @@
 
 ## Verified personalized greeting (2026-10-26)
 
-Rovo picks its empty-chat greeting from 85 personalized texts ("Let's get to work, {name}", "What's top of mind, {name}?" and others). The empty-chat check accepted only "How can I help, {name}?", so with another greeting it refused a real empty chat with "New chat is unavailable; empty-chat state is unverified" and sent nothing. It now checks Rovo's own `rovo-empty-state` container, and the error names each failed check in `empty_chat_failed`. Every other empty-chat condition is unchanged. Live, 1 question: `ask --new` from an empty chat completed, verified, with the exact answer. Offline: 400 passed.
+Rovo picks its empty-chat greeting from 85 personalized texts ("Let's get to work, {name}", "What's top of mind, {name}?" and others). The empty-chat check accepted only "How can I help, {name}?", so with another greeting it refused a real empty chat with "New chat is unavailable; empty-chat state is unverified" and sent nothing. It now checks Rovo's own `rovo-empty-state` container, and the error names each failed check in `empty_chat_failed`. Every other empty-chat condition is unchanged. Live, 1 question: `ask --new` from an empty chat completed, verified, with the exact answer; the minimal update check, run by VS Code Copilot, then passed all five steps. Offline: 400 passed.
 
 ## Verified approval without Quartz (2026-10-26)
 
