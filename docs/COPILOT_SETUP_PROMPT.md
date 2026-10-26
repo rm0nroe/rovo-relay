@@ -1,6 +1,6 @@
 # Copilot setup prompt
 
-This is the canonical Copilot setup and qualification document. For browser-bridge installation or updates, use the first prompt. To update an existing installation and prove automatic continuity with a synthetic two-question test, use the update section. To assess browserless Rovo delegation before changing the bridge, use the A2A qualification section below instead. Do not run both paths as automatic fallbacks.
+This is the canonical Copilot setup and qualification document. For browser-bridge installation or updates, use the first prompt. To update an existing installation and prove automatic continuity with a synthetic two-question test, use the update section; for the cheapest check of a later update, use the minimal update check. To assess browserless Rovo delegation before changing the bridge, use the A2A qualification section below instead. Do not run both paths as automatic fallbacks.
 
 ```text
 Install Rovo Relay CLI from https://github.com/rm0nroe/rovo-relay and configure it for this project.
@@ -68,6 +68,23 @@ Continue the synthetic continuity acceptance test in the SAME retained rovo-rela
 2. Close the process's stdin and wait for it to exit. Leave the test chat, request records and my tabs in place.
 
 3. Return a short, copyable report with account emails, site names, personal paths and chat IDs redacted: OS, shell, runtime/harness and transport; installed commit and version; doctor capabilities; startup readiness fields and elapsed attach/prepare times; both results (`execution_status`, `conversation_mode`, `continuity_status`, `next`, `timings_ms`, response text); whether the two chat IDs matched (yes/no only); visible turn count before and after the follow-up; Rovo questions used (two maximum). Mark anything unobserved as unknown. Restart continuity was not tested. Do not send further live requests or change code without a new instruction from me.
+~~~
+
+## Minimal update check
+
+The cheapest check that an existing installation runs the current code: one Copilot turn, two Rovo questions, one-shot commands only (no retained process). It covers the reinstall, a multi-line new chat, an automatic follow-up, the timeout partial answer, `reconcile`, `chat list` and `chat export`. Outputs go to private files and only named fields are printed, so Copilot reads almost nothing. Chrome remote debugging must already be enabled; without a broker, approve Chrome's prompt once per command (five times). Watch for the visual checks yourself: your active tab never changes, and on macOS the CLI's window sits tiny in the bottom-right corner and its tab closes after each command.
+
+~~~text
+Run the rovo-relay minimal update check. This block is self-contained: do not read other docs or explore the repo. Keep output small: redirect each CLI command's stdout to a file in a private folder outside Git and print only the fields named, using
+python -c 'import json,sys;d=json.load(open(sys.argv[1]));print({k:len(d[k]) if isinstance(d.get(k),list) else d.get(k) for k in sys.argv[2:]})' FILE FIELD...
+Record each command's exit code. Never retry a Rovo send. By pasting this I authorize exactly two Rovo questions. Ask me for SITE and EMAIL if unknown; use a new SESSION name. Every CLI command below starts with `rovo-relay-cli --json --site SITE --session SESSION --account EMAIL`.
+
+1. In the existing checkout: `git status -sb` (stop if it shows local changes), `git pull --ff-only`, `git merge-base --is-ancestor d71dd8f HEAD`, then `python -m pip install -q --force-reinstall --no-deps .` in the existing environment. From outside the checkout, `rovo-relay-cli broker --help` and `rovo-relay-cli reconcile --help` must both exit 0 (output not needed). On macOS only, if I give you a verified Chrome port: start `rovo-relay-cli --chrome-port PORT --approve-chrome-prompt broker` in a background terminal and wait for its `ready` line; later commands use it.
+2. Write q1.txt with exactly these three lines: "Read-only synthetic test." / "Reply with exactly ORBIT-5826." / "Do not search, use tools, save memories, or change any resources." Run `ask --new --prompt-file q1.txt`. Fields: execution_status continuity_status answer. PASS: exit 0, completed, verified, ORBIT-5826. Keep chat_id private; read it from the file for step 5.
+3. Write q2.txt: "Using only the preceding assistant response, return it in lowercase. Do not search or use tools." Run `ask --timeout 1 --prompt-file q2.txt` (no --new, no --chat). Fields: execution_status next partial_answer. PASS: exit 3, next reconcile, partial_answer is not ORBIT-5826. If it exits 0 instead, record it and skip step 4.
+4. Wait 30 seconds, then run `reconcile`. Fields: execution_status submission_state answer. PASS: exit 0, completed, observed_submitted, orbit-5826.
+5. Run `chat list`, fields: execution_status coverage truncated chats. Then `chat export --chat CHAT_ID`, fields: execution_status coverage messages. PASS: both exit 0; export coverage complete with at least 4 messages.
+6. Stop the broker if started. Reply with only a five-row table (step, PASS/FAIL, exit code, one-line note) plus OS and `git rev-parse --short HEAD`. No chat IDs, emails, site names or paths.
 ~~~
 
 ## A2A qualification before changing the transport
