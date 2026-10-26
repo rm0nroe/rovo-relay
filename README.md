@@ -13,7 +13,7 @@ This is an experimental, unofficial client. See the validation notes before live
 - Installable command, persistent foreground JSON-lines session, interactive REPL and an on-demand Copilot skill.
 - Agent-mediated MCP fallback with durable local delivery guards (offline-tested; live acceptance pending).
 
-Live browser tests passed on macOS. Actual GitHub file retrieval failed on that test site. A fully windowless (headless) mode is not possible with the real Chrome profile; other operating systems and invocation from VS Code Copilot remain unverified. See [validation](docs/VALIDATION.md).
+Live browser tests passed on macOS, run directly and through VS Code Copilot. Actual GitHub file retrieval failed on the test site. A fully windowless (headless) mode is not possible with the real Chrome profile; other operating systems remain unverified. See [validation](docs/VALIDATION.md).
 
 ## Install
 
@@ -131,7 +131,7 @@ A site-level lock serializes this harness's commands. It cannot prevent another 
 
 Use the [copy-and-paste Copilot setup prompt](docs/COPILOT_SETUP_PROMPT.md) to install and test through VS Code Copilot.
 
-Invoke the skill as `/ask-rovo`. The repository includes `.github/skills/ask-rovo/SKILL.md`, with its `MCP_FALLBACK.md` and `TROUBLESHOOTING.md` references, all also bundled in the package. Every direct result carries `next` (`ask`, `new_or_inspect`, `mcp_fallback`, `fix_or_report`, `reconcile` or `stop`), so the skill stays a short table and loads its references only when a result needs them. The session's first line also carries `version` and `implemented`, replacing a separate `doctor` call per ask, and completed results include per-phase `timings_ms`. To use it in another project, review and copy the entire `ask-rovo` skill folder without overwriting local customizations. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Actual VS Code invocation still needs acceptance under Copilot.
+Invoke the skill as `/ask-rovo`. The repository includes `.github/skills/ask-rovo/SKILL.md`, with its `MCP_FALLBACK.md` and `TROUBLESHOOTING.md` references, all also bundled in the package. Every direct result carries `next` (`ask`, `new_or_inspect`, `mcp_fallback`, `fix_or_report`, `reconcile` or `stop`), so the skill stays a short table and loads its references only when a result needs them. The session's first line also carries `version` and `implemented`, replacing a separate `doctor` call per ask, and completed results include per-phase `timings_ms`. To use it in another project, review and copy the entire `ask-rovo` skill folder without overwriting local customizations. Put the installed CLI on the terminal PATH used by that project. Supply the destination site, expected account and session when invoking the skill. Invoking the skill from VS Code Copilot has not been accepted yet.
 
 ### Automatic MCP fallback
 

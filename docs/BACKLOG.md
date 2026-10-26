@@ -6,7 +6,7 @@ Remaining work for `main` (package `0.1.0a6`). Details and evidence live in [Val
 
 Open: whether Copilot keeps one session process alive between commands (see [Connection improvements](CONNECTION_IMPROVEMENTS.md)).
 
-## Speed work (architecture review, candidate 1 shipped in `cab2512`)
+## Speed work (architecture review, candidate 1 shipped in `528d9dd`)
 
 macOS, one retained session, in seconds. "Before" is the baseline after candidate 1. "Now" is one live run each on 2026-10-24 after items 5, 6 and 8, not an average:
 

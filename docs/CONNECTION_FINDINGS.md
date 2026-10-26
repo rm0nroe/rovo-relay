@@ -1,6 +1,6 @@
 # Connection findings
 
-Local code and evidence reviewed at `41ca8de` on 2026-10-23. External capability research below was checked on 2026-10-22; it is not target-organization acceptance or a fresh connector check.
+Local code and evidence reviewed at `48677cb` on 2026-10-23. External capability research below was checked on 2026-10-22; it is not target-organization acceptance or a fresh connector check.
 
 ## Decision
 
@@ -10,9 +10,9 @@ Check official access before expanding the bridge: MCP v2 documents full-file re
 
 ## Current local evidence
 
-The installed CLI at `7c5f895` passed new-chat creation, switching from an existing conversation and automatic second-turn continuation after process restart and owned-tab closure. Each scenario used one additional authorized question. ID comparisons, exact read-only exports and saved signatures verified conversation identity; the process restart established conversation continuity, not reuse of the previous browser connection.
+The installed CLI at `6b4cb0d` passed new-chat creation, switching from an existing conversation and automatic second-turn continuation after process restart and owned-tab closure. Each scenario used one additional authorized question. ID comparisons, exact read-only exports and saved signatures verified conversation identity; the process restart established conversation continuity, not reuse of the previous browser connection.
 
-At `41ca8de`, 249 installed offline tests passed. Read-only startup reproduced and then verified the fix for the narrow-window Ask Rovo timeout: Show more must remain open between account verification and the launcher click. A second status passed with the panel already open. No questions were sent for that fix. Detailed scope and historical results are in [Validation status](VALIDATION.md#current-development-baseline-2026-10-23).
+At `48677cb`, 249 installed offline tests passed. Read-only startup reproduced and then verified the fix for the narrow-window Ask Rovo timeout: Show more must remain open between account verification and the launcher click. A second status passed with the panel already open. No questions were sent for that fix. Detailed scope and historical results are in [Validation status](VALIDATION.md#current-development-baseline-2026-10-23).
 
 ## Official alternatives checked on 2026-10-22
 

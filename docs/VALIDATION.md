@@ -6,7 +6,7 @@ Goal: guarded approval without extra Python packages. The helper ran on system `
 
 Change: the helper finds the prompt through System Events, like the press it already made, so it needs only Accessibility (plus Automation of System Events) for the app running the CLI. It runs on the CLI's own interpreter; `allow.sh` is removed.
 
-Live, 0 questions: a one-shot `status` with `--approve-chrome-prompt`, while a watcher polled the new lookup. The prompt appeared as a sheet on the front Chrome window, disappeared, and `status` returned `authenticated_ui`; no CLI window or debugging client remained. The minimal update check then ran exactly as written, 2 questions, from a fresh regular install: the broker took its port from `lsof` (Chrome had written no `DevToolsActivePort`) and was approved with no click; the multi-line new chat, the timed-out follow-up (exit 3, empty `partial_answer`), reconcile (`orbit-5826`), list (complete) and export (complete, 4 messages) all passed through it, and SIGTERM removed the socket with no CLI window left. It also showed that a timeout result carries `next: stop`, so the check's step 3 now expects that. Offline: 400 passed from source and from the installed wheel.
+Live, 0 questions: a one-shot `status` with `--approve-chrome-prompt`, while a watcher polled the new lookup. The prompt appeared as a sheet on the front Chrome window, disappeared, and `status` returned `authenticated_ui`; no CLI window or debugging client remained. The minimal update check then ran exactly as written, 2 questions, from a fresh regular install: the broker took its port from `lsof` (Chrome had written no `DevToolsActivePort`) and was approved with no click; the multi-line new chat, the timed-out follow-up (exit 3, empty `partial_answer`), reconcile (`orbit-5826`), list (complete) and export (complete, 4 messages) all passed through it, and SIGTERM removed the socket with no CLI window left. It also showed that a timeout result carries `next: stop`, so the check's step 3 now expects that. Offline: 400 passed from source and from the installed wheel. Run by VS Code Copilot with no Quartz installed, the same check passed all five steps through a broker Copilot started with `--approve-chrome-prompt`.
 
 ## Verified out-of-sight operation (2026-10-24)
 
@@ -201,7 +201,7 @@ The answer completed with verified continuity and turn count one. A read-only ex
 
 ## Verified follow-up speed (2026-10-24)
 
-Implementation `125d940`, included in published `main` at `34ffca7`, passed the live comparison below through the installed CLI in normal Chrome. Both source and installed-wheel suites passed **302 tests**, with **8 opt-in local-browser checks skipped** in each. The wheel used the declared isolated build requirements, and all 15 packaged files matched source byte for byte.
+Implementation `3fa3e8e`, included in published `main` at `3b7806a`, passed the live comparison below through the installed CLI in normal Chrome. Both source and installed-wheel suites passed **302 tests**, with **8 opt-in local-browser checks skipped** in each. The wheel used the declared isolated build requirements, and all 15 packaged files matched source byte for byte.
 
 | Phase | Normal picker | Verified open-chat shortcut | Difference |
 |---|---:|---:|---:|
@@ -224,9 +224,9 @@ The CLI exited normally, only the test-created tab was closed, and all original 
 
 ## Earlier development baseline (2026-10-23)
 
-Source `41ca8de`, package version `0.1.0a6`, passed **249 offline tests** against the installed command outside the checkout, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the venv executable directory on PATH. The installed backend matched source byte-for-byte and `git diff --check` passed. An initial invocation had 10 subprocess failures because PATH omitted the CLI; the corrected invocation passed all tests. A normal isolated `pip install --no-deps .` build succeeded with the declared build requirements; the older offline fallback described below is historical.
+Source `48677cb`, package version `0.1.0a6`, passed **249 offline tests** against the installed command outside the checkout, with `CLI_ANYTHING_FORCE_INSTALLED=1` and the venv executable directory on PATH. The installed backend matched source byte-for-byte and `git diff --check` passed. An initial invocation had 10 subprocess failures because PATH omitted the CLI; the corrected invocation passed all tests. A normal isolated `pip install --no-deps .` build succeeded with the declared build requirements; the older offline fallback described below is historical.
 
-The following live scenarios passed on `7c5f895` in normal signed-in Chrome. They used three separately authorized questions in total, with no submission retries; read-only exports and saved records supplied the verification:
+The following live scenarios passed on `6b4cb0d` in normal signed-in Chrome. They used three separately authorized questions in total, with no submission retries; read-only exports and saved records supplied the verification:
 
 | Scenario | Additional questions | Verified result |
 |---|---|---|
@@ -234,15 +234,15 @@ The following live scenarios passed on `7c5f895` in normal signed-in Chrome. The
 | Existing conversation to `ask --new` | 1 | Enabled New chat path; distinct new ID with one turn; original conversation unchanged |
 | Second turn after CLI restart and owned-tab closure | 1 | Plain `ask` with no `--chat` or `--new` reused the saved ID; two turns with the first unchanged; reply used the prior token without repeating it in the follow-up prompt |
 
-The restart test first encountered a pre-submit startup failure, `Ask Rovo (detached)`. After user-approved restart and window expansion, continuity passed. Subsequent read-only investigation reproduced the narrow-window failure: account verification dismissed Show more before clicking the launcher inside it. Commit `41ca8de` removes that premature dismissal while retaining final menu cleanup and all identity/delivery checks. Its regression failed before the fix; fresh installed startup and another status then passed at the narrow layout without resizing. **No questions were sent after this readiness fix.**
+The restart test first encountered a pre-submit startup failure, `Ask Rovo (detached)`. After user-approved restart and window expansion, continuity passed. Subsequent read-only investigation reproduced the narrow-window failure: account verification dismissed Show more before clicking the launcher inside it. Commit `48677cb` removes that premature dismissal while retaining final menu cleanup and all identity/delivery checks. Its regression failed before the fix; fresh installed startup and another status then passed at the narrow layout without resizing. **No questions were sent after this readiness fix.**
 
-Commit `7c5f895` added private-safe `click_diagnostics` with a fixed control label, allowlisted reason and timeout flag. The reproduced startup failure verified those diagnostics live. The earlier post-readiness pre-submit timeout still lacks its original detailed call log and remains unidentified; it must not be attributed to this startup bug. No automatic click or submission retry was added.
+Commit `6b4cb0d` added private-safe `click_diagnostics` with a fixed control label, allowlisted reason and timeout flag. The reproduced startup failure verified those diagnostics live. The earlier post-readiness pre-submit timeout still lacks its original detailed call log and remains unidentified; it must not be attributed to this startup bug. No automatic click or submission retry was added.
 
 Task-owned diagnostic processes, tabs and build scaffolding were removed; synthetic conversations and request evidence remain private outside Git. These results accept the measured local paths only. Copilot acceptance, grounded retrieval and mini-modal sends remain open. See [the testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure. Earlier sections below retain their candidate-specific historical counts and limits.
 
 ## Automatic conversation continuity (2026-10-23)
 
-Commit `bcb1554` adds automatic conversation binding for the same site/session/account, explicit `--new`, verified capture from loaded picker IDs and history checks before follow-up. The final installed candidate passed 205 offline tests outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`; all 12 installed files and three documentation mirror pairs matched source. Use the [development testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure.
+Commit `60b76b7` adds automatic conversation binding for the same site/session/account, explicit `--new`, verified capture from loaded picker IDs and history checks before follow-up. The final installed candidate passed 205 offline tests outside the checkout with `CLI_ANYTHING_FORCE_INSTALLED=1`; all 12 installed files and three documentation mirror pairs matched source. Use the [development testing runbook](TESTING_RUNBOOK.md) for the repeatable procedure.
 
 Three authorized synthetic turns completed in the owner's normal signed-in Chrome with the same captured conversation ID and visible turn counts of one, two and three. No follow-up supplied `--chat`. The second turn reused the foreground connection; the third used a fresh installed process and reopened the saved chat. The final pre-submit history and persistence refinements were verified offline after these live requests, not by another live submission. The exact pinned isolated build remained unavailable; the wheel used existing setuptools 84.0.0 and wheel 0.48.0.
 
@@ -307,7 +307,7 @@ These checks used incremental installs on macOS. The final development build als
 
 ## Open acceptance gates
 
-Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (none seen up to 102 messages), actual Copilot invocation, other operating systems and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
+Grounded GitHub retrieval, structured citations, more than two images, upload error variants, chats larger than one Rovo response (none seen up to 102 messages), session lifetime under Copilot, other operating systems and end-to-end token or billing savings remain unverified or unimplemented. The standalone guide's measured core-skill text reduction is a narrower claim.
 
 Live calls consume Rovo credits. An earlier development run exhausted its allowance; that historical observation does not establish the current balance. Each new live test requires authorization and available allowance. Documentation review does not authorize questions. A finished CLI response is not a passing code-retrieval result.
 
